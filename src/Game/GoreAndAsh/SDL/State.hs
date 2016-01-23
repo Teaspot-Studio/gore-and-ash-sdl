@@ -1,4 +1,13 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-|
+Module      : Game.GoreAndAsh.SDL.State
+Description : Internal core module state
+Copyright   : (c) Anton Gushcha, 2015-2016
+License     : BSD3
+Maintainer  : ncrashed@gmail.com
+Stability   : experimental
+Portability : POSIX
+-}
 module Game.GoreAndAsh.SDL.State(
     SDLState(..)
   , emptySDLState
@@ -22,7 +31,9 @@ import qualified Data.Sequence as S
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H 
 
--- | Inner state of logger
+-- | Inner state of SDL module.
+--
+-- [@s@] - State of next module, the states are chained via nesting.
 data SDLState s = SDLState {
   sdlNextState :: !s
 , sdlWindows :: !(HashMap Text (Window, Renderer, V4 Word8))

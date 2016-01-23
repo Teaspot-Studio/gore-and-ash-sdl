@@ -1,3 +1,14 @@
+{-|
+Module      : Game.GoreAndAsh.SDL.API
+Description : Monadic and arrow API for SDL core module
+Copyright   : (c) Anton Gushcha, 2015-2016
+License     : BSD3
+Maintainer  : ncrashed@gmail.com
+Stability   : experimental
+Portability : POSIX
+
+The module contains monadic and arrow API of the core module.
+-}
 module Game.GoreAndAsh.SDL.API(
     MonadSDL(..)
   , WindowConfig(..)
@@ -40,7 +51,6 @@ import SDL.Internal.Types
 import qualified SDL.Raw as SDLRaw 
 
 import Game.GoreAndAsh
-import Game.GoreAndAsh.Math
 import Game.GoreAndAsh.SDL.Module
 import Game.GoreAndAsh.SDL.State
 

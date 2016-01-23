@@ -1,4 +1,16 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-|
+Module      : Game.GoreAndAsh.SDL.Module
+Description : Monad transformer of the module
+Copyright   : (c) Anton Gushcha, 2015-2016
+License     : BSD3
+Maintainer  : ncrashed@gmail.com
+Stability   : experimental
+Portability : POSIX
+
+The module contains declaration of monad transformer of the core module and
+instance for 'GameModule' class.
+-}
 module Game.GoreAndAsh.SDL.Module(
     SDLT(..)
   ) where
@@ -16,6 +28,24 @@ import SDL
 import Game.GoreAndAsh
 import Game.GoreAndAsh.SDL.State
 
+-- | Monad transformer of SDL core module.
+--
+-- [@s@] - State of next core module in modules chain;
+--
+-- [@m@] - Next monad in modules monad stack;
+--
+-- [@a@] - Type of result value;
+--
+-- How to embed module:
+-- 
+-- @
+-- type AppStack = ModuleStack [SDLT, ... other modules ... ] IO
+--
+-- newtype AppMonad a = AppMonad (AppStack a)
+--   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL)
+-- @
+--
+-- The module is NOT pure within first phase (see 'ModuleStack' docs), therefore currently only 'IO' end monad can handler the module.
 newtype SDLT s m a = SDLT { runSDLT :: StateT (SDLState s) m a }
   deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix, MonadTrans, MonadIO, MonadThrow, MonadCatch, MonadMask)
 
