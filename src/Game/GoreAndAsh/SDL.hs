@@ -1,4 +1,4 @@
-{-# OPTIONS_HADDOCK ignore-exports #-}
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-|
 Module      : Game.GoreAndAsh.SDL
 Description : Module that contains SDL integration for Gore&Ash
@@ -73,3 +73,12 @@ import SDL as ReExport hiding (get, Event)
 import Game.GoreAndAsh.SDL.API as X 
 import Game.GoreAndAsh.SDL.Module as X 
 import Game.GoreAndAsh.SDL.State as X 
+
+-- imports for docs
+import Control.Monad.State.Strict
+import Control.Monad.Catch
+import Control.Wire
+import Data.Text
+import Game.GoreAndAsh.Core
+import Linear
+import SDL
