@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 cabal configure && cabal build && cabal haddock --hyperlink-source \
                                     --html-location='/package/$pkg-$version/docs' \
-                                    --contents-location='/package/$pkg'
+                                    --contents-location='/package/$pkg' \
+                                    --haddock-options="--use-contents=https://hackage.haskell.org/package/${1}-${2}"
 S=$?
 if [ "${S}" -eq "0" ]; then
     cd "dist/doc/html"
