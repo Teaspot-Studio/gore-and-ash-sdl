@@ -1,3 +1,4 @@
+{-# OPTIONS_HADDOCK ignore-exports #-}
 {-|
 Module      : Game.GoreAndAsh.SDL
 Description : Module that contains SDL integration for Gore&Ash
