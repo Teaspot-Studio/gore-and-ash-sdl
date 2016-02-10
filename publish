@@ -1,0 +1,3 @@
+stack upload .
+sudo docker build -t gore-and-ash-sdl .
+sudo docker run --rm -it gore-and-ash-sdl
