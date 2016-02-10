@@ -36,7 +36,7 @@ import Control.Wire
 import Control.Wire.Unsafe.Event
 import Data.Int 
 import Data.Sequence (Seq)
-import Data.Text (Text)
+import Data.Text (Text, unpack)
 import Data.Word 
 import Foreign 
 import GHC.Generics 
@@ -64,11 +64,12 @@ instance Exception SDL'ModuleException
 
 -- | Low level API for module
 class (MonadIO m, MonadThrow m) => MonadSDL m where 
+  
   -- | Creates window and stores in module context
   --
   -- Throws @SDL'ConflictingWindows@ on name conflict
   sdlCreateWindowM :: 
-       Text -- ^ Window name that is used to get the window (and renderer) from the module later
+       WindowName -- ^ Window name that is used to get the window (and renderer) from the module later
     -> Text -- ^ Title of the window
     -> WindowConfig -- ^ Window configuration
     -> RendererConfig -- ^ Renderer configuration
@@ -76,18 +77,32 @@ class (MonadIO m, MonadThrow m) => MonadSDL m where
 
   -- | Getting window and renderer by name
   sdlGetWindowM :: 
-       Text -- ^ Window name that was used at @sdlCreateWindowM@ call
+       WindowName -- ^ Window name that was used at @sdlCreateWindowM@ call
     -> m (Maybe (Window, Renderer))
 
   -- | Destroying window and renderer by name
   sdlDestroyWindowM ::
-       Text -- ^ Window name that was used at @sdlCreateWindowM@ call
+       WindowName -- ^ Window name that was used at @sdlCreateWindowM@ call
     -> m ()
 
   -- | Setup background color for window
   sdlSetBackColor :: 
-       Text -- ^ Window name that was used at @sdlCreateWindowM@ call
+       WindowName -- ^ Window name that was used at @sdlCreateWindowM@ call
     -> Maybe (V4 Word8) -- ^ Color to set, Nothing to do not clear color
+    -> m ()
+
+  -- | Creates context for given window
+  --
+  -- Note: destroys previous context if existed
+  sdlCreateContext :: 
+       WindowName -- ^ Window name that was used at @sdlCreateWindowM@ call
+    -> m ()
+
+  -- | Makes GL context of given window current
+  --
+  -- Does nothing if 'sdlCreateContext' wasn't called.
+  sdlMakeCurrent :: 
+       WindowName -- ^ Window name that was used at @sdlCreateWindowM@ call
     -> m ()
 
   -- | Getting window shown events that occurs scince last frame
@@ -219,6 +234,25 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadThrow m) => MonadSDL (SDLT s m) wh
           winfo' = winfo { winfoColor = c }
       Nothing -> return ()
 
+  sdlCreateContext n = do 
+    s <- SDLT get 
+    case H.lookup n . sdlWindows $! s of 
+      Just winfo -> do 
+        whenJust (winfoContext winfo) glDeleteContext
+        cntx <- glCreateContext $ winfoWindow winfo 
+        let winfo' = winfo { winfoContext = Just cntx }
+        SDLT . put $! s {
+          sdlWindows = H.insert n winfo' . sdlWindows $! s
+        }
+        liftIO . putStrLn $! "Created context for " <> unpack n
+      Nothing -> return ()
+
+  sdlMakeCurrent n = do 
+    s <- SDLT get 
+    case H.lookup n . sdlWindows $! s of 
+      Just WindowInfo{..} -> whenJust winfoContext $ glMakeCurrent winfoWindow
+      Nothing -> return ()
+
   sdlWindowShownEventsM = sdlWindowShownEvents <$> get
   sdlWindowHiddenEventsM = sdlWindowHiddenEvents <$> get
   sdlWindowExposedEventsM = sdlWindowExposedEvents <$> get
@@ -261,6 +295,8 @@ instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadThrow (mt m), MonadSDL m, Mo
   sdlGetWindowM = lift . sdlGetWindowM
   sdlDestroyWindowM = lift . sdlDestroyWindowM
   sdlSetBackColor a b = lift $ sdlSetBackColor a b 
+  sdlCreateContext = lift . sdlCreateContext 
+  sdlMakeCurrent = lift . sdlMakeCurrent
 
   sdlWindowShownEventsM = lift sdlWindowShownEventsM
   sdlWindowHiddenEventsM = lift sdlWindowHiddenEventsM
@@ -298,12 +334,6 @@ instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadThrow (mt m), MonadSDL m, Mo
   sdlDollarGestureEventsM = lift sdlDollarGestureEventsM
   sdlDropEventsM = lift sdlDropEventsM
   sdlClipboardUpdateEventsM = lift sdlClipboardUpdateEventsM
-
--- | Helper to trigger action when value is 'Just'
-whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
-whenJust ma f = case ma of 
-  Nothing -> return ()
-  Just a -> f a 
 
 -- | Fires when specific scancode key is pressed/unpressed
 keyScancode :: MonadSDL m => Scancode -> InputMotion -> GameWire m a (Event (Seq KeyboardEventData))
