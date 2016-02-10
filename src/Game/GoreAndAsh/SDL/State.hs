@@ -10,6 +10,8 @@ Portability : POSIX
 -}
 module Game.GoreAndAsh.SDL.State(
     SDLState(..)
+  , WindowName
+  , WindowInfo(..)
   , emptySDLState
   , flashSDLState
   ) where
@@ -24,6 +26,7 @@ import SDL.Event
 import SDL.Input.Keyboard
 import SDL.Input.Mouse
 import SDL.Internal.Types
+import SDL.Video
 
 import Data.Sequence (Seq)
 import qualified Data.Sequence as S 
@@ -31,12 +34,25 @@ import qualified Data.Sequence as S
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H 
 
+-- | Windows are uniquely identified by names
+type WindowName = Text 
+
+-- | Context of window
+data WindowInfo = WindowInfo {
+  winfoWindow :: !Window 
+, winfoRenderer :: !Renderer 
+, winfoColor :: !(Maybe (V4 Word8))
+, winfoContext :: !(Maybe GLContext)
+} deriving (Generic)
+
+instance NFData WindowInfo 
+
 -- | Inner state of SDL module.
 --
 -- [@s@] - State of next module, the states are chained via nesting.
 data SDLState s = SDLState {
   sdlNextState :: !s
-, sdlWindows :: !(HashMap Text (Window, Renderer, Maybe (V4 Word8)))
+, sdlWindows :: !(HashMap WindowName WindowInfo)
 
 , sdlWindowShownEvents :: !(Seq WindowShownEventData)
 , sdlWindowHiddenEvents :: !(Seq WindowHiddenEventData)
@@ -121,6 +137,9 @@ instance NFData Window where
   rnf = (`seq` ())
 
 instance NFData Renderer where
+  rnf = (`seq` ())
+
+instance NFData GLContext where
   rnf = (`seq` ())
 
 instance NFData SysWMEventData where

@@ -182,21 +182,28 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadThrow m) => MonadSDL (SDLT s m) wh
     case H.lookup n . sdlWindows $! s of 
       Just _ -> throwM . SDL'ConflictingWindows $! n
       Nothing -> do
+        let winfo = WindowInfo {
+                winfoWindow = w 
+              , winfoRenderer = r 
+              , winfoColor = Nothing 
+              , winfoContext = Nothing
+              }
         SDLT . put $! s {
-            sdlWindows = H.insert n (w, r, Nothing) . sdlWindows $! s
+            sdlWindows = H.insert n winfo . sdlWindows $! s
           }
         return (w, r)
 
   sdlGetWindowM n = do 
     s <- SDLT get 
-    return . fmap (\(w, r, _) -> (w, r)) . H.lookup n . sdlWindows $! s 
+    return . fmap (\WindowInfo{..} -> (winfoWindow, winfoRenderer)) . H.lookup n . sdlWindows $! s 
 
   sdlDestroyWindowM n = do 
     s <- SDLT get 
     case H.lookup n . sdlWindows $! s of 
-      Just (w, r, _) -> do 
-        destroyRenderer r 
-        destroyWindow w
+      Just WindowInfo{..} -> do 
+        destroyRenderer winfoRenderer 
+        destroyWindow winfoWindow
+        whenJust winfoContext glDeleteContext 
         SDLT . put $! s {
           sdlWindows = H.delete n . sdlWindows $! s
         }
@@ -205,9 +212,11 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadThrow m) => MonadSDL (SDLT s m) wh
   sdlSetBackColor n c = do 
     s <- SDLT get 
     case H.lookup n . sdlWindows $! s of 
-      Just (w, r, _) -> SDLT . put $! s {
-          sdlWindows = H.insert n (w, r, c) . sdlWindows $! s 
+      Just winfo -> SDLT . put $! s {
+          sdlWindows = H.insert n winfo' . sdlWindows $! s 
         }
+        where 
+          winfo' = winfo { winfoColor = c }
       Nothing -> return ()
 
   sdlWindowShownEventsM = sdlWindowShownEvents <$> get
@@ -289,6 +298,12 @@ instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadThrow (mt m), MonadSDL m, Mo
   sdlDollarGestureEventsM = lift sdlDollarGestureEventsM
   sdlDropEventsM = lift sdlDropEventsM
   sdlClipboardUpdateEventsM = lift sdlClipboardUpdateEventsM
+
+-- | Helper to trigger action when value is 'Just'
+whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+whenJust ma f = case ma of 
+  Nothing -> return ()
+  Just a -> f a 
 
 -- | Fires when specific scancode key is pressed/unpressed
 keyScancode :: MonadSDL m => Scancode -> InputMotion -> GameWire m a (Event (Seq KeyboardEventData))

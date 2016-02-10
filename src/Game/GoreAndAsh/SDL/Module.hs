@@ -19,6 +19,7 @@ import Control.Monad.Catch
 import Control.Monad.Fix 
 import Control.Monad.IO.Class 
 import Control.Monad.State.Strict
+import Data.Proxy 
 import qualified Data.Foldable as F 
 import qualified Data.HashMap.Strict as H 
 import qualified Data.Sequence as S 
@@ -61,24 +62,29 @@ instance GameModule m s => GameModule (SDLT s m) (SDLState s) where
       })
 
   newModuleState = emptySDLState <$> newModuleState
-  withModule _ io = initializeAll >> io
+  withModule _ io = do
+    initializeAll
+    liftIO $ putStrLn "SDL initialized"
+    withModule (Proxy :: Proxy m) io
+
   cleanupModule _ = quit
 
 -- | Takes all window and renderers and update them
 drawWindows :: MonadIO m => SDLState s -> m ()
 drawWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
   where 
-  go (_, r, _) = present r 
+  go WindowInfo{..} = present winfoRenderer 
 
 -- | Clear surface of all windows
 clearWindows :: MonadIO m => SDLState s -> m ()
 clearWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
   where 
-  go (_, r, Just c) = do 
-    rendererDrawColor r $= c
-    clear r
-  go (_, _, Nothing) = return ()
-
+  go WindowInfo{..} = case winfoColor of 
+    Nothing -> return ()
+    Just c -> do 
+      rendererDrawColor winfoRenderer $= c
+      clear winfoRenderer
+    
 -- | Catch all SDL events
 processEvents :: MonadIO m => SDLState s -> m (SDLState s)
 processEvents sdlState = do 
