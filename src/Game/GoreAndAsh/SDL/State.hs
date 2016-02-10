@@ -14,6 +14,8 @@ module Game.GoreAndAsh.SDL.State(
   , WindowInfo(..)
   , emptySDLState
   , flashSDLState
+  -- | Helpers
+  , whenJust
   ) where
 
 import Control.DeepSeq 
@@ -239,3 +241,9 @@ flashSDLState s = s {
   , sdlDropEvents = S.empty
   , sdlClipboardUpdateEvents = S.empty
   }
+
+-- | Helper to trigger action when value is 'Just'
+whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+whenJust ma f = case ma of 
+  Nothing -> return ()
+  Just a -> f a 

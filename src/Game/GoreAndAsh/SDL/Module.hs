@@ -73,7 +73,9 @@ instance GameModule m s => GameModule (SDLT s m) (SDLState s) where
 drawWindows :: MonadIO m => SDLState s -> m ()
 drawWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
   where 
-  go WindowInfo{..} = present winfoRenderer 
+  go WindowInfo{..} = do
+    whenJust winfoContext . const . glSwapWindow $! winfoWindow
+    present winfoRenderer 
 
 -- | Clear surface of all windows
 clearWindows :: MonadIO m => SDLState s -> m ()
@@ -84,7 +86,7 @@ clearWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
     Just c -> do 
       rendererDrawColor winfoRenderer $= c
       clear winfoRenderer
-    
+
 -- | Catch all SDL events
 processEvents :: MonadIO m => SDLState s -> m (SDLState s)
 processEvents sdlState = do 
