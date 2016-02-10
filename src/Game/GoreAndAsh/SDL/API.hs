@@ -87,7 +87,7 @@ class (MonadIO m, MonadThrow m) => MonadSDL m where
   -- | Setup background color for window
   sdlSetBackColor :: 
        Text -- ^ Window name that was used at @sdlCreateWindowM@ call
-    -> V4 Word8 -- ^ Color to set
+    -> Maybe (V4 Word8) -- ^ Color to set, Nothing to do not clear color
     -> m ()
 
   -- | Getting window shown events that occurs scince last frame
@@ -183,11 +183,9 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadThrow m) => MonadSDL (SDLT s m) wh
       Just _ -> throwM . SDL'ConflictingWindows $! n
       Nothing -> do
         SDLT . put $! s {
-            sdlWindows = H.insert n (w, r, defColor) . sdlWindows $! s
+            sdlWindows = H.insert n (w, r, Nothing) . sdlWindows $! s
           }
         return (w, r)
-    where 
-      defColor = V4 0 0 0 255
 
   sdlGetWindowM n = do 
     s <- SDLT get 

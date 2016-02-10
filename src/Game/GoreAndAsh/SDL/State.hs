@@ -36,7 +36,7 @@ import qualified Data.HashMap.Strict as H
 -- [@s@] - State of next module, the states are chained via nesting.
 data SDLState s = SDLState {
   sdlNextState :: !s
-, sdlWindows :: !(HashMap Text (Window, Renderer, V4 Word8))
+, sdlWindows :: !(HashMap Text (Window, Renderer, Maybe (V4 Word8)))
 
 , sdlWindowShownEvents :: !(Seq WindowShownEventData)
 , sdlWindowHiddenEvents :: !(Seq WindowHiddenEventData)

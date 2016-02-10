@@ -74,9 +74,10 @@ drawWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
 clearWindows :: MonadIO m => SDLState s -> m ()
 clearWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
   where 
-  go (_, r, c) = do 
+  go (_, r, Just c) = do 
     rendererDrawColor r $= c
     clear r
+  go (_, _, Nothing) = return ()
 
 -- | Catch all SDL events
 processEvents :: MonadIO m => SDLState s -> m (SDLState s)
