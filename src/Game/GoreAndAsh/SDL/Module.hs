@@ -15,15 +15,17 @@ module Game.GoreAndAsh.SDL.Module(
     SDLT(..)
   ) where
 
+import Control.Monad.Base 
 import Control.Monad.Catch
+import Control.Monad.Error.Class 
 import Control.Monad.Fix 
 import Control.Monad.IO.Class 
 import Control.Monad.State.Strict
+import Control.Monad.Trans.Resource
 import Data.Proxy 
 import qualified Data.Foldable as F 
 import qualified Data.HashMap.Strict as H 
 import qualified Data.Sequence as S 
-
 import SDL
 
 import Game.GoreAndAsh
@@ -48,8 +50,14 @@ import Game.GoreAndAsh.SDL.State
 --
 -- The module is NOT pure within first phase (see 'ModuleStack' docs), therefore currently only 'IO' end monad can handler the module.
 newtype SDLT s m a = SDLT { runSDLT :: StateT (SDLState s) m a }
-  deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix, MonadTrans, MonadIO, MonadThrow, MonadCatch, MonadMask)
+  deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix, MonadTrans, MonadIO, MonadThrow, MonadCatch, MonadMask, MonadError e)
 
+instance MonadBase IO m => MonadBase IO (SDLT s m) where 
+  liftBase = SDLT . liftBase
+
+instance MonadResource m => MonadResource (SDLT s m) where 
+  liftResourceT = SDLT . liftResourceT
+  
 instance GameModule m s => GameModule (SDLT s m) (SDLState s) where 
   type ModuleState (SDLT s m) = SDLState s
   runModule (SDLT m) s = do

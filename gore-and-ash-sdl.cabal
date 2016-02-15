@@ -1,5 +1,5 @@
 name:                gore-and-ash-sdl
-version:             2.0.0.0
+version:             2.1.0.0
 synopsis:            Gore&Ash core module for integration with SDL library
 description:         Please see README.md
 homepage:            git@github.com:Teaspot-Studio/gore-and-ash-sdl.git
@@ -28,9 +28,11 @@ library
                      , lens >= 4.13
                      , linear >= 1.20.3
                      , mtl >= 2.2.1
+                     , resourcet >= 1.1.7.1
                      , sdl2 >= 2.1.1
                      , text >= 1.2.2.0
                      , transformers >= 0.4.2.0
+                     , transformers-base >= 0.4.4
                      , unordered-containers >= 0.2.5.1
                      
   default-extensions:    
