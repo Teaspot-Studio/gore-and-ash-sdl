@@ -1,8 +1,11 @@
-FROM phadej/ghc:7.10.2-ubuntu
+FROM haskell:8.0.1
+
+RUN apt-get update
+RUN apt-get -y install curl
 
 RUN add-apt-repository ppa:zoogie/sdl2-snapshots
 RUN apt-get update
-RUN apt-get install -y pkg-config libsdl2-dev curl
+RUN apt-get install -y pkg-config libsdl2-dev
 
 ADD mkdocs /opt/project/
 ADD LICENSE /opt/project/
@@ -14,4 +17,4 @@ ADD src /opt/project/src
 
 WORKDIR /opt/project
 
-ENTRYPOINT ["./mkdocs", "gore-and-ash-sdl", "2.1.0.0", "NCrashed"]
+ENTRYPOINT ["./mkdocs", "gore-and-ash-sdl", "2.1.1.0", "NCrashed"]
