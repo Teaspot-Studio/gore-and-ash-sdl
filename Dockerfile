@@ -2,10 +2,7 @@ FROM haskell:8.0.1
 
 RUN apt-get update
 RUN apt-get -y install curl
-
-RUN add-apt-repository ppa:zoogie/sdl2-snapshots
-RUN apt-get update
-RUN apt-get install -y pkg-config libsdl2-dev
+RUN apt-get -y install pkg-config libsdl2-dev
 
 ADD mkdocs /opt/project/
 ADD LICENSE /opt/project/
