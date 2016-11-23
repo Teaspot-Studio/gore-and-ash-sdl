@@ -30,7 +30,8 @@ library
     , containers            >= 0.5.6.2  && < 0.6
     , deepseq               >= 1.4.1.1  && < 1.5
     , exceptions            >= 0.8.0.2  && < 0.9
-    , gore-and-ash          >= 2.0.0.0  && < 2.1
+    , gore-and-ash          >= 2.0      && < 2.1
+    , gore-and-ash-logging  >= 3.0      && < 3.1
     , lens                  >= 4.13     && < 4.15
     , linear                >= 1.20.3   && < 1.21
     , mtl                   >= 2.2.1    && < 2.3

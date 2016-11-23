@@ -15,17 +15,17 @@ module Game.GoreAndAsh.SDL.Module(
     SDLT(..)
   ) where
 
-import Control.Monad.Base 
+import Control.Monad.Base
 import Control.Monad.Catch
-import Control.Monad.Error.Class 
-import Control.Monad.Fix 
-import Control.Monad.IO.Class 
+import Control.Monad.Error.Class
+import Control.Monad.Fix
+import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 import Control.Monad.Trans.Resource
-import Data.Proxy 
-import qualified Data.Foldable as F 
-import qualified Data.HashMap.Strict as H 
-import qualified Data.Sequence as S 
+import Data.Proxy
+import qualified Data.Foldable as F
+import qualified Data.HashMap.Strict as H
+import qualified Data.Sequence as S
 import SDL
 
 import Game.GoreAndAsh
@@ -33,39 +33,43 @@ import Game.GoreAndAsh.SDL.State
 
 -- | Monad transformer of SDL core module.
 --
--- [@s@] - State of next core module in modules chain;
+-- [@t@] - FRP engine implementation, can be almost always ignored.
 --
 -- [@m@] - Next monad in modules monad stack;
 --
 -- [@a@] - Type of result value;
 --
 -- How to embed module:
--- 
--- @
--- type AppStack = ModuleStack [SDLT, ... other modules ... ] IO
 --
--- newtype AppMonad a = AppMonad (AppStack a)
---   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL)
 -- @
---
--- The module is NOT pure within first phase (see 'ModuleStack' docs), therefore currently only 'IO' end monad can handler the module.
-newtype SDLT s m a = SDLT { runSDLT :: StateT (SDLState s) m a }
-  deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix, MonadTrans, MonadIO, MonadThrow, MonadCatch, MonadMask, MonadError e)
+-- newtype AppMonad t a = AppMonad (SDLT t (LoggingT (GameMonad t)) a)
+--   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL, LoggingMonad)
+-- @
+newtype SDLT t m a = SDLT { runSDLT :: ReaderT (SDLState t) m a }
+  deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix
+    , MonadIO, MonadThrow, MonadCatch, MonadMask, MonadError e)
 
-instance MonadBase IO m => MonadBase IO (SDLT s m) where 
+instance MonadTrans (NetworkT t) where
+  lift = NetworkT . lift
+
+instance MonadCatch m => MonadError NetworkError (NetworkT t m) where
+  throwError = throwM
+  catchError = catch
+
+instance MonadBase IO m => MonadBase IO (SDLT s m) where
   liftBase = SDLT . liftBase
 
-instance MonadResource m => MonadResource (SDLT s m) where 
+instance MonadResource m => MonadResource (SDLT s m) where
   liftResourceT = SDLT . liftResourceT
-  
-instance GameModule m s => GameModule (SDLT s m) (SDLState s) where 
+
+instance GameModule m s => GameModule (SDLT s m) (SDLState s) where
   type ModuleState (SDLT s m) = SDLState s
   runModule (SDLT m) s = do
-    s' <- processEvents s 
+    s' <- processEvents s
     clearWindows s'
     ((a, s''), nextState) <- runModule (runStateT m s') (sdlNextState s')
     drawWindows s''
-    return (a, flashSDLState $ s'' { 
+    return (a, flashSDLState $ s'' {
         sdlNextState = nextState
       })
 
@@ -80,28 +84,28 @@ instance GameModule m s => GameModule (SDLT s m) (SDLState s) where
 -- | Takes all window and renderers and update them
 drawWindows :: MonadIO m => SDLState s -> m ()
 drawWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
-  where 
+  where
   go WindowInfo{..} = do
     whenJust winfoContext . const . glSwapWindow $! winfoWindow
-    present winfoRenderer 
+    present winfoRenderer
 
 -- | Clear surface of all windows
 clearWindows :: MonadIO m => SDLState s -> m ()
 clearWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
-  where 
-  go WindowInfo{..} = case winfoColor of 
+  where
+  go WindowInfo{..} = case winfoColor of
     Nothing -> return ()
-    Just c -> do 
+    Just c -> do
       rendererDrawColor winfoRenderer $= c
       clear winfoRenderer
 
 -- | Catch all SDL events
 processEvents :: MonadIO m => SDLState s -> m (SDLState s)
-processEvents sdlState = do 
+processEvents sdlState = do
   es <- pollEvents
   return $! F.foldl' process sdlState (eventPayload <$> es)
-  where 
-  process s e = case e of 
+  where
+  process s e = case e of
     WindowShownEvent d -> s { sdlWindowShownEvents = sdlWindowShownEvents s S.|> d }
     WindowHiddenEvent d -> s { sdlWindowHiddenEvents = sdlWindowHiddenEvents s S.|> d }
     WindowExposedEvent d -> s { sdlWindowExposedEvents = sdlWindowExposedEvents s S.|> d }
