@@ -8,8 +8,8 @@ Maintainer  : ncrashed@gmail.com
 Stability   : experimental
 Portability : POSIX
 
-The core module contains API for SDL2 library integration. 
-The module doesn't depends on others core modules and could be place in any place in 
+The core module contains API for SDL2 library integration.
+The module doesn't depends on others core modules and could be place in any place in
 game monad stack.
 
 The module is NOT pure within first phase (see 'ModuleStack' docs), therefore currently only 'IO' end monad can handler the module.
@@ -22,20 +22,20 @@ type AppStack = ModuleStack [SDLT, ... other modules ... ] IO
 newtype AppState = AppState (ModuleState AppStack)
   deriving (Generic)
 
-instance NFData AppState 
+instance NFData AppState
 
 -- | Wrapper around type family
 newtype AppMonad a = AppMonad (AppStack a)
   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL, ... other modules monads ... )
-  
-instance GameModule AppMonad AppState where 
+
+instance GameModule AppMonad AppState where
   type ModuleState AppMonad = AppState
-  runModule (AppMonad m) (AppState s) = do 
-    (a, s') <- runModule m s 
+  runModule (AppMonad m) (AppState s) = do
+    (a, s') <- runModule m s
     return (a, AppState s')
   newModuleState = AppState <$> newModuleState
   withModule _ = withModule (Proxy :: Proxy AppStack)
-  cleanupModule (AppState s) = cleanupModule s 
+  cleanupModule (AppState s) = cleanupModule s
 
 -- | Arrow that is build over the monad stack
 type AppWire a b = GameWire AppMonad a b
@@ -45,33 +45,74 @@ type AppActor i a b = GameActor AppMonad i a b
 
 -}
 module Game.GoreAndAsh.SDL(
-  -- * Low level API
-    SDLState
+  -- * Basic API
+    MonadSDL(..)
   , SDLT
-  , MonadSDL(..)
-  -- * Arrow API
   , WindowConfig(..)
   , RendererConfig(..)
   , RendererType(..)
   , module ReExport
-  -- ** Keyboard arrow API
+  -- * Window widget
+  , WindowDrawer
+  -- ** Window configuration
+  , WindowWidgetConf
+  , defaultWindowCfg
+  , windowCfgTitle
+  , windowCfgConfig
+  , windowCfgRendererConfig
+  , windowCfgDestroy
+  , windowCfgDraw
+  , windowCfgHide
+  , windowCfgRaise
+  , windowCfgShow
+  , windowCfgMinimumSize
+  , windowCfgMaximumSize
+  , windowCfgSize
+  , windowCfgBordered
+  , windowCfgBrightness
+  , windowCfgGammaRamp
+  , windowCfgGrab
+  , windowCfgWindowMode
+  , windowCfgPosition
+  -- ** Window widget
+  , WindowWidget
+  , windowWindow
+  , windowRenderer
+  , windowShown
+  , windowHidden
+  , windowExposed
+  , windowMoved
+  , windowResized
+  , windowSizeChanged
+  , windowMinimized
+  , windowMaximized
+  , windowRestored
+  , windowGainedMouseFocus
+  , windowLostMouseFocus
+  , windowGainedKeyboardFocus
+  , windowLostKeyboardFocus
+  , windowClosed
+  , windowKeyboardEvent
+  , windowTextEditingEvent
+  , windowTextInputEvent
+  , windowMouseMotionEvent
+  , windowMouseButtonEvent
+  , windowMouseWheelEvent
+  , windowUserEvent
+  -- * High-level API wrappers
   , keyScancode
   , keyPress
   , keyRelease
   , keyPressing
-  -- ** Mouse arrow API
   , mouseScroll
   , mouseScrollX
   , mouseScrollY
   , mouseClick
-  -- ** Window arrow API
-  , windowClosed
   ) where
 
 -- imports for docs
 import Control.Monad.State.Strict
 import Control.Monad.Catch
-import Control.Wire
 import Data.Text
 import Game.GoreAndAsh.Core
 import Linear
@@ -79,6 +120,6 @@ import SDL
 
 import SDL as ReExport hiding (get, Event)
 
-import Game.GoreAndAsh.SDL.API as X 
-import Game.GoreAndAsh.SDL.Module as X 
-import Game.GoreAndAsh.SDL.State as X 
+import Game.GoreAndAsh.SDL.API as X
+import Game.GoreAndAsh.SDL.Module as X
+import Game.GoreAndAsh.SDL.State as X

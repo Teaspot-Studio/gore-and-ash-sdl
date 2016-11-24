@@ -10,7 +10,6 @@ Portability : POSIX
 -}
 module Game.GoreAndAsh.SDL.State(
     SDLState(..)
-  , emptySDLState
   -- * Errors
   , SDL'ModuleException(..)
   , renderSDLModuleException
@@ -75,44 +74,3 @@ data SDLState t = SDLState {
 , sdlStateDropEvent :: !(Event t DropEventData)
 , sdlStateClipboardUpdateEvent :: !(Event t ClipboardUpdateEventData)
 } deriving (Generic)
-
--- | Creates empty module state
-emptySDLState :: Reflex t => SDLState t
-emptySDLState = SDLState {
-    sdlStateWindowShownEvent = never
-  , sdlStateWindowHiddenEvent = never
-  , sdlStateWindowExposedEvent = never
-  , sdlStateWindowMovedEvent = never
-  , sdlStateWindowResizedEvent = never
-  , sdlStateWindowSizeChangedEvent = never
-  , sdlStateWindowMinimizedEvent = never
-  , sdlStateWindowMaximizedEvent = never
-  , sdlStateWindowRestoredEvent = never
-  , sdlStateWindowGainedMouseFocusEvent = never
-  , sdlStateWindowLostMouseFocusEvent = never
-  , sdlStateWindowGainedKeyboardFocusEvent = never
-  , sdlStateWindowLostKeyboardFocusEvent = never
-  , sdlStateWindowClosedEvent = never
-  , sdlStateKeyboardEvent = never
-  , sdlStateTextEditingEvent = never
-  , sdlStateTextInputEvent = never
-  , sdlStateMouseMotionEvent = never
-  , sdlStateMouseButtonEvent = never
-  , sdlStateMouseWheelEvent = never
-  , sdlStateJoyAxisEvent = never
-  , sdlStateJoyBallEvent = never
-  , sdlStateJoyHatEvent = never
-  , sdlStateJoyButtonEvent = never
-  , sdlStateJoyDeviceEvent = never
-  , sdlStateControllerAxisEvent = never
-  , sdlStateControllerButtonEvent = never
-  , sdlStateControllerDeviceEvent = never
-  , sdlStateQuitEvent = never
-  , sdlStateUserEvent = never
-  , sdlStateSysWMEvent = never
-  , sdlStateTouchFingerEvent = never
-  , sdlStateMultiGestureEvent = never
-  , sdlStateDollarGestureEvent = never
-  , sdlStateDropEvent = never
-  , sdlStateClipboardUpdateEvent = never
-  }

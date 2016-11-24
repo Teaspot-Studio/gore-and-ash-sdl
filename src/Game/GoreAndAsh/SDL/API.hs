@@ -10,6 +10,7 @@ Portability : POSIX
 The module contains monadic and arrow API of the core module.
 -}
 module Game.GoreAndAsh.SDL.API(
+  -- * Basic API
     MonadSDL(..)
   , WindowConfig(..)
   , RendererConfig(..)
@@ -55,7 +56,6 @@ module Game.GoreAndAsh.SDL.API(
   , windowGainedKeyboardFocus
   , windowLostKeyboardFocus
   , windowClosed
-  , windowSysWMEvent
   , windowKeyboardEvent
   , windowTextEditingEvent
   , windowTextInputEvent
@@ -63,46 +63,36 @@ module Game.GoreAndAsh.SDL.API(
   , windowMouseButtonEvent
   , windowMouseWheelEvent
   , windowUserEvent
-  -- * Keyboard arrow API
+  -- * High-level API wrappers
   , keyScancode
   , keyPress
   , keyRelease
   , keyPressing
-  -- * Mouse arrow API
   , mouseScroll
   , mouseScrollX
   , mouseScrollY
   , mouseClick
-  -- * Window arrow API
-  , windowClosed
   ) where
 
 import Control.Lens ((^.))
 import Control.Monad.Catch
-import Control.Monad.State.Strict
-import Control.Wire
-import Control.Wire.Unsafe.Event
+import Control.Monad.Except
+import Control.Monad.Extra (whenJust)
+import Control.Monad.Reader
 import Data.Int
-import Data.Sequence (Seq)
-import Data.Text (Text, unpack)
+import Data.Text (Text)
 import Data.Word
-import Foreign
+import Foreign.C
 import GHC.Generics
 import Linear
 import Linear.Affine
-import Prelude hiding (id, (.))
-import qualified Data.HashMap.Strict as H
-import qualified Data.Sequence as S
+import Data.Vector.Storable as VS (Vector)
 
 import SDL as ReExport hiding (get, Event)
-import SDL.Internal.Types
-import qualified SDL.Raw as SDLRaw
 
 import Game.GoreAndAsh
 import Game.GoreAndAsh.SDL.Module
 import Game.GoreAndAsh.SDL.State
-
-instance Exception SDL'ModuleException
 
 -- | Action that draws content of the window
 type WindowDrawer t = Window -> Renderer -> HostFrame t ()
@@ -138,14 +128,14 @@ data WindowWidgetConf t = WindowWidgetConf {
   -- | The window brightness property is updated when the event fires
 , windowCfgBrightness :: !(Event t Float)
   -- | The window gamma ramp is updated when the event fires
-, windowCfgGammaRamp :: !(Event t (V3 (Vector Word16)))
+, windowCfgGammaRamp :: !(Event t (V3 (VS.Vector Word16)))
   -- | When the event fires the window will be updated whether the mouse shall be confined to the window.
 , windowCfgGrab :: !(Event t Bool)
   -- | When the event fires the window changes its window mode.
 , windowCfgWindowMode :: !(Event t WindowMode)
   -- | When the event fires the window changes its position.
 , windowCfgPosition :: !(Event t WindowPosition)
-}
+} deriving (Generic)
 
 -- | Return default window config
 defaultWindowCfg :: Reflex t => WindowWidgetConf t
@@ -154,6 +144,7 @@ defaultWindowCfg = WindowWidgetConf {
   , windowCfgConfig = defaultWindow
   , windowCfgRendererConfig = defaultRenderer
   , windowCfgDestroy = never
+  , windowCfgCreateContext = never
   , windowCfgDraw = never
   , windowCfgHide = never
   , windowCfgRaise = never
@@ -175,7 +166,14 @@ data WindowWidget t = WindowWidget {
   windowWindow :: !Window
   -- | Window SDL renderer
 , windowRenderer :: !Renderer
-
+  -- | Configuration that was used to create the window
+, windowConf :: !(WindowWidgetConf t)
+  -- | Tracks current size of window
+, windowSizeDyn :: !(Dynamic t (V2 Int))
+  -- | Fired when a GL context is created for the window
+, windowContextCreated :: !(Event t GLContext)
+  -- | Fires when the window is rerendered
+, windowDrawn :: !(Event t ())
   -- | Fires when the window is shown
 , windowShown :: !(Event t ())
   -- | Fires when the window is hidden
@@ -183,9 +181,9 @@ data WindowWidget t = WindowWidget {
   -- | Fires when the window is exposed
 , windowExposed :: !(Event t ())
   -- | Fires when the window is moved
-, windowMoved :: !(Event t (Point V2 Int32))
+, windowMoved :: !(Event t (Point V2 Int))
   -- | Fires when the window is resized
-, windowResized :: !(Event t (V2 Int32))
+, windowResized :: !(Event t (V2 Int))
   -- | The window size has changed, either as a result of an API call or through the system or user changing the window size; this event is followed by WindowResizedEvent if the size was changed by an external event, i.e. the user or the window manager.
 , windowSizeChanged :: !(Event t ())
   -- | Fires when the window is minimized
@@ -204,8 +202,6 @@ data WindowWidget t = WindowWidget {
 , windowLostKeyboardFocus :: !(Event t ())
   -- | The window manager requests that the window be closed.
 , windowClosed :: !(Event t ())
-  -- | A video driver dependent system event
-, windowSysWMEvent :: !(Event t SysWMmsg)
 
   -- | A keyboard key has been pressed or released for the window.
 , windowKeyboardEvent :: !(Event t KeyboardEventData)
@@ -223,13 +219,11 @@ data WindowWidget t = WindowWidget {
 
   -- | User defined (external to Haskell) event is occured
 , windowUserEvent :: !(Event t UserEventData)
-}
+} deriving (Generic)
 
 -- | API of the module
 class (MonadIO m, MonadError SDL'ModuleException m) => MonadSDL t m | m -> t where
-  -- | Creates window and stores in module context
-  --
-  -- Throws `SDL'ConflictingWindows`on name conflict
+  -- | Creates new window widget
   sdlCreateWindow :: WindowWidgetConf t -> m (WindowWidget t)
 
   -- | Getting window shown event
@@ -316,309 +310,288 @@ class (MonadIO m, MonadError SDL'ModuleException m) => MonadSDL t m | m -> t whe
   -- | Getting clipboard changed event
   sdlClipboardUpdateEvent :: m (Event t ClipboardUpdateEventData)
 
-instance {-# OVERLAPPING #-} (MonadIO m, MonadThrow m) => MonadSDL (SDLT s m) where
-  sdlCreateWindowM n t wc rc = do
-    w <- createWindow t wc
-    r <- createRenderer w (-1) rc
-    s <- get
-    case H.lookup n . sdlWindows $! s of
-      Just _ -> throwM . SDL'ConflictingWindows $! n
-      Nothing -> do
-        let winfo = WindowInfo {
-                winfoWindow = w
-              , winfoRenderer = r
-              , winfoColor = Nothing
-              , winfoContext = Nothing
-              }
-        SDLT . put $! s {
-            sdlWindows = H.insert n winfo . sdlWindows $! s
-          }
-        return (w, r)
+instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => MonadSDL t (SDLT t m) where
+  sdlCreateWindow cfg@WindowWidgetConf{..} = do
+    initTitle <- sample (current windowCfgTitle)
+    w <- createWindow initTitle windowCfgConfig
+    r <- createRenderer w (-1) windowCfgRendererConfig
 
-  sdlGetWindowM n = do
-    s <- SDLT get
-    return . fmap (\WindowInfo{..} -> (winfoWindow, winfoRenderer)) . H.lookup n . sdlWindows $! s
+    -- Create context on demand and watch current value of it
+    createContextEvent <- headE windowCfgCreateContext -- don't create twice
+    windowContextCreated <- performEvent $ ffor createContextEvent $ const $ glCreateContext w
+    contextB <- hold Nothing $ fmap Just windowContextCreated
+    let whenContext m = do
+          mcontext <- sample contextB
+          whenJust mcontext m
 
-  sdlDestroyWindowM n = do
-    s <- SDLT get
-    case H.lookup n . sdlWindows $! s of
-      Just WindowInfo{..} -> do
-        destroyRenderer winfoRenderer
-        destroyWindow winfoWindow
-        whenJust winfoContext glDeleteContext
-        SDLT . put $! s {
-          sdlWindows = H.delete n . sdlWindows $! s
-        }
-      Nothing -> return ()
+    -- Destroy context, renderer and window itself
+    performEvent_ $ ffor windowCfgDestroy $ const $ do
+      whenContext glDeleteContext
+      destroyRenderer r
+      destroyWindow w
 
-  sdlSetBackColor n c = do
-    s <- SDLT get
-    case H.lookup n . sdlWindows $! s of
-      Just winfo -> SDLT . put $! s {
-          sdlWindows = H.insert n winfo' . sdlWindows $! s
-        }
-        where
-          winfo' = winfo { winfoColor = c }
-      Nothing -> return ()
+    -- Select context (if any), perform draw and then swap buffers
+    windowDrawn <- performEvent $ ffor windowCfgDraw $ \draw -> do
+      whenContext (glMakeCurrent w)
+      draw w r
+      glSwapWindow w
 
-  sdlCreateContext n = do
-    s <- SDLT get
-    case H.lookup n . sdlWindows $! s of
-      Just winfo -> do
-        whenJust (winfoContext winfo) glDeleteContext
-        cntx <- glCreateContext $ winfoWindow winfo
-        let winfo' = winfo { winfoContext = Just cntx }
-        SDLT . put $! s {
-          sdlWindows = H.insert n winfo' . sdlWindows $! s
-        }
-        liftIO . putStrLn $! "Created context for " <> unpack n
-      Nothing -> return ()
+    performEvent_ $ ffor (updated windowCfgTitle) (windowTitle w $=)
+    performEvent_ $ ffor windowCfgHide $ const $ hideWindow w
+    performEvent_ $ ffor windowCfgRaise $ const $ raiseWindow w
+    performEvent_ $ ffor windowCfgShow $ const $ showWindow w
+    performEvent_ $ ffor windowCfgMinimumSize (windowMinimumSize w $=)
+    performEvent_ $ ffor windowCfgMaximumSize (windowMaximumSize w $=)
+    performEvent_ $ ffor windowCfgSize (windowSize w $=)
+    performEvent_ $ ffor windowCfgBordered (windowBordered w $=)
+    performEvent_ $ ffor windowCfgBrightness (windowBrightness w $=)
+    performEvent_ $ ffor windowCfgGammaRamp (windowGammaRamp w $=)
+    performEvent_ $ ffor windowCfgGrab (windowGrab w $=)
+    performEvent_ $ ffor windowCfgWindowMode (setWindowMode w)
+    performEvent_ $ ffor windowCfgPosition (setWindowPosition w)
 
-  sdlMakeCurrent n = do
-    s <- SDLT get
-    case H.lookup n . sdlWindows $! s of
-      Just WindowInfo{..} -> whenJust winfoContext $ glMakeCurrent winfoWindow
-      Nothing -> return ()
+    -- | Transforms and filters event
+    let filterEvent :: Functor f => (a -> Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
+        filterEvent getter f = fmap (fmap f . ffilter ((== w) . getter))
 
-  sdlWindowShownEventsM = sdlWindowShownEvents <$> get
-  sdlWindowHiddenEventsM = sdlWindowHiddenEvents <$> get
-  sdlWindowExposedEventsM = sdlWindowExposedEvents <$> get
-  sdlWindowMovedEventsM = sdlWindowMovedEvents <$> get
-  sdlWindowResizedEventsM = sdlWindowResizedEvents <$> get
-  sdlWindowSizeChangedEventsM = sdlWindowSizeChangedEvents <$> get
-  sdlWindowMinimizedEventsM = sdlWindowMinimizedEvents <$> get
-  sdlWindowMaximizedEventsM = sdlWindowMaximizedEvents <$> get
-  sdlWindowRestoredEventsM = sdlWindowRestoredEvents <$> get
-  sdlWindowGainedMouseFocusEventsM = sdlWindowGainedMouseFocusEvents <$> get
-  sdlWindowLostMouseFocusEventsM = sdlWindowLostMouseFocusEvents <$> get
-  sdlWindowGainedKeyboardFocusEventsM = sdlWindowGainedKeyboardFocusEvents <$> get
-  sdlWindowLostKeyboardFocusEventsM = sdlWindowLostKeyboardFocusEvents <$> get
-  sdlWindowClosedEventsM = sdlWindowClosedEvents <$> get
-  sdlKeyboardEventsM = sdlKeyboardEvents <$> get
-  sdlTextEditingEventsM = sdlTextEditingEvents <$> get
-  sdlTextInputEventsM = sdlTextInputEvents <$> get
-  sdlMouseMotionEventsM = sdlMouseMotionEvents <$> get
-  sdlMouseButtonEventsM = sdlMouseButtonEvents <$> get
-  sdlMouseWheelEventsM = sdlMouseWheelEvents <$> get
-  sdlJoyAxisEventsM = sdlJoyAxisEvents <$> get
-  sdlJoyBallEventsM = sdlJoyBallEvents <$> get
-  sdlJoyHatEventsM = sdlJoyHatEvents <$> get
-  sdlJoyButtonEventsM = sdlJoyButtonEvents <$> get
-  sdlJoyDeviceEventsM = sdlJoyDeviceEvents <$> get
-  sdlControllerAxisEventsM = sdlControllerAxisEvents <$> get
-  sdlControllerButtonEventsM = sdlControllerButtonEvents <$> get
-  sdlControllerDeviceEventsM = sdlControllerDeviceEvents <$> get
-  sdlQuitEventM = sdlQuitEvent <$> get
-  sdlUserEventsM = sdlUserEvents <$> get
-  sdlSysWMEventsM = sdlSysWMEvents <$> get
-  sdlTouchFingerEventsM = sdlTouchFingerEvents <$> get
-  sdlMultiGestureEventsM = sdlMultiGestureEvents <$> get
-  sdlDollarGestureEventsM = sdlDollarGestureEvents <$> get
-  sdlDropEventsM = sdlDropEvents <$> get
-  sdlClipboardUpdateEventsM = sdlClipboardUpdateEvents <$> get
+    windowShown <- filterEvent windowShownEventWindow (const ()) sdlWindowShownEvent
+    windowHidden <- filterEvent windowHiddenEventWindow (const ()) sdlWindowHiddenEvent
+    windowExposed <- filterEvent windowExposedEventWindow (const ()) sdlWindowExposedEvent
+    windowMoved <- filterEvent windowMovedEventWindow (fmap fromIntegral . windowMovedEventPosition) sdlWindowMovedEvent
+    windowResized <- filterEvent windowResizedEventWindow (fmap fromIntegral . windowResizedEventSize) sdlWindowResizedEvent
+    windowSizeChanged <- filterEvent windowSizeChangedEventWindow (const ()) sdlWindowSizeChangedEvent
+    windowMinimized <- filterEvent windowMinimizedEventWindow (const ()) sdlWindowMinimizedEvent
+    windowMaximized <- filterEvent windowMaximizedEventWindow (const ()) sdlWindowMaximizedEvent
+    windowRestored <- filterEvent windowRestoredEventWindow (const ()) sdlWindowRestoredEvent
+    windowGainedMouseFocus <- filterEvent windowGainedMouseFocusEventWindow (const ()) sdlWindowGainedMouseFocusEvent
+    windowLostMouseFocus <- filterEvent windowLostMouseFocusEventWindow (const ()) sdlWindowLostMouseFocusEvent
+    windowGainedKeyboardFocus <- filterEvent windowGainedKeyboardFocusEventWindow (const ()) sdlWindowGainedKeyboardFocusEvent
+    windowLostKeyboardFocus <- filterEvent windowLostKeyboardFocusEventWindow (const ()) sdlWindowLostKeyboardFocusEvent
+    windowClosed <- filterEvent windowClosedEventWindow (const ()) sdlWindowClosedEvent
+    windowKeyboardEvent <- filterEvent keyboardEventWindow id sdlKeyboardEvent
+    windowTextEditingEvent <- filterEvent textEditingEventWindow id sdlTextEditingEvent
+    windowTextInputEvent <- filterEvent textInputEventWindow id sdlTextInputEvent
+    windowMouseMotionEvent <- filterEvent mouseMotionEventWindow id sdlMouseMotionEvent
+    windowMouseButtonEvent <- filterEvent mouseButtonEventWindow id sdlMouseButtonEvent
+    windowMouseWheelEvent <- filterEvent mouseWheelEventWindow id sdlMouseWheelEvent
+    windowUserEvent <- filterEvent userEventWindow id sdlUserEvent
+
+    let initialSize = fmap fromIntegral . windowInitialSize $ windowCfgConfig
+    windowSizeDyn <- holdDyn initialSize windowResized
+
+    let windowWindow = w
+        windowRenderer = r
+        windowConf = cfg
+    return WindowWidget{..}
+
+  sdlWindowShownEvent = asks sdlStateWindowShownEvent
+  sdlWindowHiddenEvent = asks sdlStateWindowHiddenEvent
+  sdlWindowExposedEvent = asks sdlStateWindowExposedEvent
+  sdlWindowMovedEvent = asks sdlStateWindowMovedEvent
+  sdlWindowResizedEvent = asks sdlStateWindowResizedEvent
+  sdlWindowSizeChangedEvent = asks sdlStateWindowSizeChangedEvent
+  sdlWindowMinimizedEvent = asks sdlStateWindowMinimizedEvent
+  sdlWindowMaximizedEvent = asks sdlStateWindowMaximizedEvent
+  sdlWindowRestoredEvent = asks sdlStateWindowRestoredEvent
+  sdlWindowGainedMouseFocusEvent = asks sdlStateWindowGainedMouseFocusEvent
+  sdlWindowLostMouseFocusEvent = asks sdlStateWindowLostMouseFocusEvent
+  sdlWindowGainedKeyboardFocusEvent = asks sdlStateWindowGainedKeyboardFocusEvent
+  sdlWindowLostKeyboardFocusEvent = asks sdlStateWindowLostKeyboardFocusEvent
+  sdlWindowClosedEvent = asks sdlStateWindowClosedEvent
+  sdlKeyboardEvent = asks sdlStateKeyboardEvent
+  sdlTextEditingEvent = asks sdlStateTextEditingEvent
+  sdlTextInputEvent = asks sdlStateTextInputEvent
+  sdlMouseMotionEvent = asks sdlStateMouseMotionEvent
+  sdlMouseButtonEvent = asks sdlStateMouseButtonEvent
+  sdlMouseWheelEvent = asks sdlStateMouseWheelEvent
+  sdlJoyAxisEvent = asks sdlStateJoyAxisEvent
+  sdlJoyBallEvent = asks sdlStateJoyBallEvent
+  sdlJoyHatEvent = asks sdlStateJoyHatEvent
+  sdlJoyButtonEvent = asks sdlStateJoyButtonEvent
+  sdlJoyDeviceEvent = asks sdlStateJoyDeviceEvent
+  sdlControllerAxisEvent = asks sdlStateControllerAxisEvent
+  sdlControllerButtonEvent = asks sdlStateControllerButtonEvent
+  sdlControllerDeviceEvent = asks sdlStateControllerDeviceEvent
+  sdlQuitEvent = asks sdlStateQuitEvent
+  sdlUserEvent = asks sdlStateUserEvent
+  sdlSysWMEvent = asks sdlStateSysWMEvent
+  sdlTouchFingerEvent = asks sdlStateTouchFingerEvent
+  sdlMultiGestureEvent = asks sdlStateMultiGestureEvent
+  sdlDollarGestureEvent = asks sdlStateDollarGestureEvent
+  sdlDropEvent = asks sdlStateDropEvent
+  sdlClipboardUpdateEvent = asks sdlStateClipboardUpdateEvent
 
   {-# INLINE sdlCreateWindow #-}
-  {-# INLINE sdlWindowShownEventsM #-}
-  {-# INLINE sdlWindowHiddenEventsM #-}
-  {-# INLINE sdlWindowExposedEventsM #-}
-  {-# INLINE sdlWindowMovedEventsM #-}
-  {-# INLINE sdlWindowResizedEventsM #-}
-  {-# INLINE sdlWindowSizeChangedEventsM #-}
-  {-# INLINE sdlWindowMinimizedEventsM #-}
-  {-# INLINE sdlWindowMaximizedEventsM #-}
-  {-# INLINE sdlWindowRestoredEventsM #-}
-  {-# INLINE sdlWindowGainedMouseFocusEventsM #-}
-  {-# INLINE sdlWindowLostMouseFocusEventsM #-}
-  {-# INLINE sdlWindowGainedKeyboardFocusEventsM #-}
-  {-# INLINE sdlWindowLostKeyboardFocusEventsM #-}
-  {-# INLINE sdlWindowClosedEventsM #-}
-  {-# INLINE sdlKeyboardEventsM #-}
-  {-# INLINE sdlTextEditingEventsM #-}
-  {-# INLINE sdlTextInputEventsM #-}
-  {-# INLINE sdlMouseMotionEventsM #-}
-  {-# INLINE sdlMouseButtonEventsM #-}
-  {-# INLINE sdlMouseWheelEventsM #-}
-  {-# INLINE sdlJoyAxisEventsM #-}
-  {-# INLINE sdlJoyBallEventsM #-}
-  {-# INLINE sdlJoyHatEventsM #-}
-  {-# INLINE sdlJoyButtonEventsM #-}
-  {-# INLINE sdlJoyDeviceEventsM #-}
-  {-# INLINE sdlControllerAxisEventsM #-}
-  {-# INLINE sdlControllerButtonEventsM #-}
-  {-# INLINE sdlControllerDeviceEventsM #-}
-  {-# INLINE sdlQuitEventM #-}
-  {-# INLINE sdlUserEventsM #-}
-  {-# INLINE sdlSysWMEventsM #-}
-  {-# INLINE sdlTouchFingerEventsM #-}
-  {-# INLINE sdlMultiGestureEventsM #-}
-  {-# INLINE sdlDollarGestureEventsM #-}
-  {-# INLINE sdlDropEventsM #-}
-  {-# INLINE sdlClipboardUpdateEventsM #-}
+  {-# INLINE sdlWindowShownEvent #-}
+  {-# INLINE sdlWindowHiddenEvent #-}
+  {-# INLINE sdlWindowExposedEvent #-}
+  {-# INLINE sdlWindowMovedEvent #-}
+  {-# INLINE sdlWindowResizedEvent #-}
+  {-# INLINE sdlWindowSizeChangedEvent #-}
+  {-# INLINE sdlWindowMinimizedEvent #-}
+  {-# INLINE sdlWindowMaximizedEvent #-}
+  {-# INLINE sdlWindowRestoredEvent #-}
+  {-# INLINE sdlWindowGainedMouseFocusEvent #-}
+  {-# INLINE sdlWindowLostMouseFocusEvent #-}
+  {-# INLINE sdlWindowGainedKeyboardFocusEvent #-}
+  {-# INLINE sdlWindowLostKeyboardFocusEvent #-}
+  {-# INLINE sdlWindowClosedEvent #-}
+  {-# INLINE sdlKeyboardEvent #-}
+  {-# INLINE sdlTextEditingEvent #-}
+  {-# INLINE sdlTextInputEvent #-}
+  {-# INLINE sdlMouseMotionEvent #-}
+  {-# INLINE sdlMouseButtonEvent #-}
+  {-# INLINE sdlMouseWheelEvent #-}
+  {-# INLINE sdlJoyAxisEvent #-}
+  {-# INLINE sdlJoyBallEvent #-}
+  {-# INLINE sdlJoyHatEvent #-}
+  {-# INLINE sdlJoyButtonEvent #-}
+  {-# INLINE sdlJoyDeviceEvent #-}
+  {-# INLINE sdlControllerAxisEvent #-}
+  {-# INLINE sdlControllerButtonEvent #-}
+  {-# INLINE sdlControllerDeviceEvent #-}
+  {-# INLINE sdlQuitEvent #-}
+  {-# INLINE sdlUserEvent #-}
+  {-# INLINE sdlSysWMEvent #-}
+  {-# INLINE sdlTouchFingerEvent #-}
+  {-# INLINE sdlMultiGestureEvent #-}
+  {-# INLINE sdlDollarGestureEvent #-}
+  {-# INLINE sdlDropEvent #-}
+  {-# INLINE sdlClipboardUpdateEvent #-}
 
-instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadThrow (mt m), MonadSDL m, MonadTrans mt) => MonadSDL (mt m) where
+instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadError SDL'ModuleException (mt m), MonadSDL t m, MonadTrans mt) => MonadSDL t (mt m) where
   sdlCreateWindow cfg = lift $ sdlCreateWindow cfg
 
-  sdlWindowShownEventsM = lift sdlWindowShownEventsM
-  sdlWindowHiddenEventsM = lift sdlWindowHiddenEventsM
-  sdlWindowExposedEventsM = lift sdlWindowExposedEventsM
-  sdlWindowMovedEventsM = lift sdlWindowMovedEventsM
-  sdlWindowResizedEventsM = lift sdlWindowResizedEventsM
-  sdlWindowSizeChangedEventsM = lift sdlWindowSizeChangedEventsM
-  sdlWindowMinimizedEventsM = lift sdlWindowMinimizedEventsM
-  sdlWindowMaximizedEventsM = lift sdlWindowMaximizedEventsM
-  sdlWindowRestoredEventsM = lift sdlWindowRestoredEventsM
-  sdlWindowGainedMouseFocusEventsM = lift sdlWindowGainedMouseFocusEventsM
-  sdlWindowLostMouseFocusEventsM = lift sdlWindowLostMouseFocusEventsM
-  sdlWindowGainedKeyboardFocusEventsM = lift sdlWindowGainedKeyboardFocusEventsM
-  sdlWindowLostKeyboardFocusEventsM = lift sdlWindowLostKeyboardFocusEventsM
-  sdlWindowClosedEventsM = lift sdlWindowClosedEventsM
-  sdlKeyboardEventsM = lift sdlKeyboardEventsM
-  sdlTextEditingEventsM = lift sdlTextEditingEventsM
-  sdlTextInputEventsM = lift sdlTextInputEventsM
-  sdlMouseMotionEventsM = lift sdlMouseMotionEventsM
-  sdlMouseButtonEventsM = lift sdlMouseButtonEventsM
-  sdlMouseWheelEventsM = lift sdlMouseWheelEventsM
-  sdlJoyAxisEventsM = lift sdlJoyAxisEventsM
-  sdlJoyBallEventsM = lift sdlJoyBallEventsM
-  sdlJoyHatEventsM = lift sdlJoyHatEventsM
-  sdlJoyButtonEventsM = lift sdlJoyButtonEventsM
-  sdlJoyDeviceEventsM = lift sdlJoyDeviceEventsM
-  sdlControllerAxisEventsM = lift sdlControllerAxisEventsM
-  sdlControllerButtonEventsM = lift sdlControllerButtonEventsM
-  sdlControllerDeviceEventsM = lift sdlControllerDeviceEventsM
-  sdlQuitEventM = lift sdlQuitEventM
-  sdlUserEventsM = lift sdlUserEventsM
-  sdlSysWMEventsM = lift sdlSysWMEventsM
-  sdlTouchFingerEventsM = lift sdlTouchFingerEventsM
-  sdlMultiGestureEventsM = lift sdlMultiGestureEventsM
-  sdlDollarGestureEventsM = lift sdlDollarGestureEventsM
-  sdlDropEventsM = lift sdlDropEventsM
-  sdlClipboardUpdateEventsM = lift sdlClipboardUpdateEventsM
+  sdlWindowShownEvent = lift sdlWindowShownEvent
+  sdlWindowHiddenEvent = lift sdlWindowHiddenEvent
+  sdlWindowExposedEvent = lift sdlWindowExposedEvent
+  sdlWindowMovedEvent = lift sdlWindowMovedEvent
+  sdlWindowResizedEvent = lift sdlWindowResizedEvent
+  sdlWindowSizeChangedEvent = lift sdlWindowSizeChangedEvent
+  sdlWindowMinimizedEvent = lift sdlWindowMinimizedEvent
+  sdlWindowMaximizedEvent = lift sdlWindowMaximizedEvent
+  sdlWindowRestoredEvent = lift sdlWindowRestoredEvent
+  sdlWindowGainedMouseFocusEvent = lift sdlWindowGainedMouseFocusEvent
+  sdlWindowLostMouseFocusEvent = lift sdlWindowLostMouseFocusEvent
+  sdlWindowGainedKeyboardFocusEvent = lift sdlWindowGainedKeyboardFocusEvent
+  sdlWindowLostKeyboardFocusEvent = lift sdlWindowLostKeyboardFocusEvent
+  sdlWindowClosedEvent = lift sdlWindowClosedEvent
+  sdlKeyboardEvent = lift sdlKeyboardEvent
+  sdlTextEditingEvent = lift sdlTextEditingEvent
+  sdlTextInputEvent = lift sdlTextInputEvent
+  sdlMouseMotionEvent = lift sdlMouseMotionEvent
+  sdlMouseButtonEvent = lift sdlMouseButtonEvent
+  sdlMouseWheelEvent = lift sdlMouseWheelEvent
+  sdlJoyAxisEvent = lift sdlJoyAxisEvent
+  sdlJoyBallEvent = lift sdlJoyBallEvent
+  sdlJoyHatEvent = lift sdlJoyHatEvent
+  sdlJoyButtonEvent = lift sdlJoyButtonEvent
+  sdlJoyDeviceEvent = lift sdlJoyDeviceEvent
+  sdlControllerAxisEvent = lift sdlControllerAxisEvent
+  sdlControllerButtonEvent = lift sdlControllerButtonEvent
+  sdlControllerDeviceEvent = lift sdlControllerDeviceEvent
+  sdlQuitEvent = lift sdlQuitEvent
+  sdlUserEvent = lift sdlUserEvent
+  sdlSysWMEvent = lift sdlSysWMEvent
+  sdlTouchFingerEvent = lift sdlTouchFingerEvent
+  sdlMultiGestureEvent = lift sdlMultiGestureEvent
+  sdlDollarGestureEvent = lift sdlDollarGestureEvent
+  sdlDropEvent = lift sdlDropEvent
+  sdlClipboardUpdateEvent = lift sdlClipboardUpdateEvent
 
   {-# INLINE sdlCreateWindow #-}
-  {-# INLINE sdlWindowShownEventsM #-}
-  {-# INLINE sdlWindowHiddenEventsM #-}
-  {-# INLINE sdlWindowExposedEventsM #-}
-  {-# INLINE sdlWindowMovedEventsM #-}
-  {-# INLINE sdlWindowResizedEventsM #-}
-  {-# INLINE sdlWindowSizeChangedEventsM #-}
-  {-# INLINE sdlWindowMinimizedEventsM #-}
-  {-# INLINE sdlWindowMaximizedEventsM #-}
-  {-# INLINE sdlWindowRestoredEventsM #-}
-  {-# INLINE sdlWindowGainedMouseFocusEventsM #-}
-  {-# INLINE sdlWindowLostMouseFocusEventsM #-}
-  {-# INLINE sdlWindowGainedKeyboardFocusEventsM #-}
-  {-# INLINE sdlWindowLostKeyboardFocusEventsM #-}
-  {-# INLINE sdlWindowClosedEventsM #-}
-  {-# INLINE sdlKeyboardEventsM #-}
-  {-# INLINE sdlTextEditingEventsM #-}
-  {-# INLINE sdlTextInputEventsM #-}
-  {-# INLINE sdlMouseMotionEventsM #-}
-  {-# INLINE sdlMouseButtonEventsM #-}
-  {-# INLINE sdlMouseWheelEventsM #-}
-  {-# INLINE sdlJoyAxisEventsM #-}
-  {-# INLINE sdlJoyBallEventsM #-}
-  {-# INLINE sdlJoyHatEventsM #-}
-  {-# INLINE sdlJoyButtonEventsM #-}
-  {-# INLINE sdlJoyDeviceEventsM #-}
-  {-# INLINE sdlControllerAxisEventsM #-}
-  {-# INLINE sdlControllerButtonEventsM #-}
-  {-# INLINE sdlControllerDeviceEventsM #-}
-  {-# INLINE sdlQuitEventM #-}
-  {-# INLINE sdlUserEventsM #-}
-  {-# INLINE sdlSysWMEventsM #-}
-  {-# INLINE sdlTouchFingerEventsM #-}
-  {-# INLINE sdlMultiGestureEventsM #-}
-  {-# INLINE sdlDollarGestureEventsM #-}
-  {-# INLINE sdlDropEventsM #-}
-  {-# INLINE sdlClipboardUpdateEventsM #-}
+  {-# INLINE sdlWindowShownEvent #-}
+  {-# INLINE sdlWindowHiddenEvent #-}
+  {-# INLINE sdlWindowExposedEvent #-}
+  {-# INLINE sdlWindowMovedEvent #-}
+  {-# INLINE sdlWindowResizedEvent #-}
+  {-# INLINE sdlWindowSizeChangedEvent #-}
+  {-# INLINE sdlWindowMinimizedEvent #-}
+  {-# INLINE sdlWindowMaximizedEvent #-}
+  {-# INLINE sdlWindowRestoredEvent #-}
+  {-# INLINE sdlWindowGainedMouseFocusEvent #-}
+  {-# INLINE sdlWindowLostMouseFocusEvent #-}
+  {-# INLINE sdlWindowGainedKeyboardFocusEvent #-}
+  {-# INLINE sdlWindowLostKeyboardFocusEvent #-}
+  {-# INLINE sdlWindowClosedEvent #-}
+  {-# INLINE sdlKeyboardEvent #-}
+  {-# INLINE sdlTextEditingEvent #-}
+  {-# INLINE sdlTextInputEvent #-}
+  {-# INLINE sdlMouseMotionEvent #-}
+  {-# INLINE sdlMouseButtonEvent #-}
+  {-# INLINE sdlMouseWheelEvent #-}
+  {-# INLINE sdlJoyAxisEvent #-}
+  {-# INLINE sdlJoyBallEvent #-}
+  {-# INLINE sdlJoyHatEvent #-}
+  {-# INLINE sdlJoyButtonEvent #-}
+  {-# INLINE sdlJoyDeviceEvent #-}
+  {-# INLINE sdlControllerAxisEvent #-}
+  {-# INLINE sdlControllerButtonEvent #-}
+  {-# INLINE sdlControllerDeviceEvent #-}
+  {-# INLINE sdlQuitEvent #-}
+  {-# INLINE sdlUserEvent #-}
+  {-# INLINE sdlSysWMEvent #-}
+  {-# INLINE sdlTouchFingerEvent #-}
+  {-# INLINE sdlMultiGestureEvent #-}
+  {-# INLINE sdlDollarGestureEvent #-}
+  {-# INLINE sdlDropEvent #-}
+  {-# INLINE sdlClipboardUpdateEvent #-}
 
 -- | Fires when specific scancode key is pressed/unpressed
-keyScancode :: MonadSDL m => Scancode -> InputMotion -> GameWire m a (Event (Seq KeyboardEventData))
-keyScancode sc im = liftGameMonad $ do
-  es <- S.filter isNeeded <$> sdlKeyboardEventsM
-  return $! if S.null es
-    then NoEvent
-    else Event es
+keyScancode :: Reflex t => WindowWidget t -> Scancode -> InputMotion -> Event t KeyboardEventData
+keyScancode w sc im = ffilter isNeeded $ windowKeyboardEvent w
   where
-    isNeeded KeyboardEventData{..} = keyboardEventKeyMotion == im
-      && sc == keysymScancode keyboardEventKeysym
+  isNeeded KeyboardEventData{..} = keyboardEventKeyMotion == im
+    && sc == keysymScancode keyboardEventKeysym
 
 -- | Fires when specific scancode key is pressed
-keyPress :: MonadSDL m => Scancode -> GameWire m a (Event (Seq KeyboardEventData))
-keyPress sc = keyScancode sc Pressed
+keyPress :: Reflex t => WindowWidget t -> Scancode -> Event t KeyboardEventData
+keyPress w sc = keyScancode w sc Pressed
 
 -- | Fires when specific scancode key is released
-keyRelease :: MonadSDL m => Scancode -> GameWire m a (Event (Seq KeyboardEventData))
-keyRelease sc = keyScancode sc Released
+keyRelease :: Reflex t => WindowWidget t -> Scancode -> Event t KeyboardEventData
+keyRelease w sc = keyScancode w sc Released
 
 -- | Fires event from moment of press until release of given key
-keyPressing :: MonadSDL m => Scancode -> GameWire m a (Event KeyboardEventData)
-keyPressing sc = go NoEvent
+keyPressing :: (MonadHold t m, MonadFix m, Reflex t) => WindowWidget t -> Scancode -> m (Dynamic t (Maybe KeyboardEventData))
+keyPressing w sc = foldDynMaybe checkRelease Nothing pressE
   where
-    go !e = mkGen $ \_ _ -> do
-      !mks <- S.viewr . S.filter isNeeded <$> sdlKeyboardEventsM
-      return $! case mks of
-        S.EmptyR -> (Right e, go e)
-        _ S.:> mds@KeyboardEventData{..} -> case keyboardEventKeyMotion of
-          Pressed -> (Right $! Event mds, go $! Event mds)
-          Released -> (Right NoEvent, go NoEvent)
+  pressE = ffilter isNeeded $ windowKeyboardEvent w
 
-    isNeeded KeyboardEventData{..} = sc == keysymScancode keyboardEventKeysym
+  checkRelease mds@KeyboardEventData{..} mold = case mold of
+    Nothing -> case keyboardEventKeyMotion of
+      Pressed -> Just (Just mds)
+      Released -> Nothing
+    Just _ -> case keyboardEventKeyMotion of
+      Pressed -> Nothing
+      Released -> Just Nothing
 
--- | Returns accumulated mouse scroll scince last frame
-mouseScroll :: MonadSDL m => GameWire m a (Event (V2 Int32))
-mouseScroll = liftGameMonad $ do
-  es <- sdlMouseWheelEventsM
-  return $! if S.null es
-    then NoEvent
-    else Event . sumV . fmap mouseWheelEventPos $! es
+  isNeeded KeyboardEventData{..} = sc == keysymScancode keyboardEventKeysym
 
 -- | Returns accumulated mouse scroll scince last frame
-mouseScrollX :: MonadSDL m => GameWire m a (Event Int32)
-mouseScrollX = mapE (^. _x) . mouseScroll
+mouseScroll :: Reflex t => WindowWidget t -> Event t (V2 Int32)
+mouseScroll w = mouseWheelEventPos <$> windowMouseWheelEvent w
 
 -- | Returns accumulated mouse scroll scince last frame
-mouseScrollY :: MonadSDL m => GameWire m a (Event Int32)
-mouseScrollY = mapE (^. _y) . mouseScroll
+mouseScrollX :: Reflex t => WindowWidget t -> Event t Int32
+mouseScrollX = fmap (^. _x) . mouseScroll
 
--- | Fires when window with specific name is closed
-windowClosed :: MonadSDL m => Text -> GameWire m a (Event ())
-windowClosed n = go Nothing
-  where
-  go Nothing = mkGen $ \_ _ -> do
-    mr <- sdlGetWindowM n
-    return $! case mr of
-      Nothing -> (Right NoEvent, go Nothing)
-      Just (w, _) -> (Right NoEvent, go $ Just w)
-  go (Just w) = liftGameMonad $ do
-    es <- S.filter isNeeded <$> sdlWindowClosedEventsM
-    return $! if S.null es
-      then NoEvent
-      else Event ()
-    where
-      isNeeded WindowClosedEventData{..} = windowClosedEventWindow == w
+-- | Returns accumulated mouse scroll scince last frame
+mouseScrollY :: Reflex t => WindowWidget t -> Event t Int32
+mouseScrollY = fmap (^. _y) . mouseScroll
 
 -- | Fires when user clicks within window. Click coordinates are in [-1 .. 1] range
-mouseClick :: MonadSDL m => MouseButton -> GameWire m a (Event (V2 Double))
-mouseClick mb = liftGameMonad $ do
-  es <- S.filter isNeeded <$> sdlMouseButtonEventsM
-  case S.viewr es of
-    S.EmptyR -> return NoEvent
-    _ S.:> MouseButtonEventData{..} -> do
-      (size :: V2 Int) <- getWindowSize mouseButtonEventWindow
-      return . Event $! transformCoords size mouseButtonEventPos
+mouseClick :: Reflex t => WindowWidget t -> MouseButton -> Event t (V2 Double)
+mouseClick widg mb = pushAlways convertCoords btnE
   where
+    btnE = ffilter isNeeded $ windowMouseButtonEvent widg
     isNeeded MouseButtonEventData{..} = mouseButtonEventButton == mb && mouseButtonEventMotion == Pressed
+
+    convertCoords MouseButtonEventData{..} = do
+      size <- sample (current $ windowSizeDyn widg)
+      return $ transformCoords size mouseButtonEventPos
+
     transformCoords (V2 w h) (P (V2 xi yi)) =
       inv33 (viewportTransform2D 0 (V2 (fromIntegral w) (fromIntegral h)))
       `applyTransform2D`
       V2 (fromIntegral xi) (fromIntegral yi)
-
--- | Helper to hide pointer manipulation while getting window size
-getWindowSize :: (MonadIO m, Integral a) => Window -> m (V2 a)
-getWindowSize (Window wptr) = liftIO $ with 0 $ \xptr -> with 0 $ \yptr -> do
-  SDLRaw.getWindowSize wptr xptr yptr
-  x <- peek xptr
-  y <- peek yptr
-  return $! V2 (fromIntegral x) (fromIntegral y)

@@ -30,6 +30,7 @@ library
     , containers            >= 0.5.6.2  && < 0.6
     , deepseq               >= 1.4.1.1  && < 1.5
     , exceptions            >= 0.8.0.2  && < 0.9
+    , extra                 >= 1.4      && < 1.5
     , gore-and-ash          >= 2.0      && < 2.1
     , gore-and-ash-logging  >= 3.0      && < 3.1
     , lens                  >= 4.13     && < 4.15
@@ -41,11 +42,14 @@ library
     , transformers          >= 0.4.2.0  && < 0.6
     , transformers-base     >= 0.4.4    && < 0.6
     , unordered-containers  >= 0.2.5.1  && < 0.3
+    , vector                >= 0.11     && < 0.12
 
   default-extensions:
     BangPatterns
     DeriveGeneric
+    FlexibleContexts
     FlexibleInstances
+    FunctionalDependencies
     GeneralizedNewtypeDeriving
     MultiParamTypeClasses
     OverloadedStrings

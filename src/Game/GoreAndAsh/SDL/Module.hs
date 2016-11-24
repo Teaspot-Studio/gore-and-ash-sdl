@@ -22,10 +22,8 @@ import Control.Monad.Fix
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 import Control.Monad.Trans.Resource
+import Control.Monad.Reader
 import Data.Proxy
-import qualified Data.Foldable as F
-import qualified Data.HashMap.Strict as H
-import qualified Data.Sequence as S
 import SDL
 
 import Game.GoreAndAsh
@@ -43,103 +41,166 @@ import Game.GoreAndAsh.SDL.State
 --
 -- @
 -- newtype AppMonad t a = AppMonad (SDLT t (LoggingT (GameMonad t)) a)
---   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL, LoggingMonad)
+--   deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadThrow, MonadCatch, MonadSDL t, LoggingMonad, MonadSample t, MonadHold t)
 -- @
 newtype SDLT t m a = SDLT { runSDLT :: ReaderT (SDLState t) m a }
-  deriving (Functor, Applicative, Monad, MonadState (SDLState s), MonadFix
-    , MonadIO, MonadThrow, MonadCatch, MonadMask, MonadError e)
+  deriving (Functor, Applicative, Monad, MonadReader (SDLState t), MonadFix
+    , MonadIO, MonadThrow, MonadCatch, MonadMask, MonadSample t, MonadHold t)
 
-instance MonadTrans (NetworkT t) where
-  lift = NetworkT . lift
+instance MonadTrans (SDLT t) where
+  lift = SDLT . lift
 
-instance MonadCatch m => MonadError NetworkError (NetworkT t m) where
+instance MonadCatch m => MonadError SDL'ModuleException (SDLT t m) where
   throwError = throwM
   catchError = catch
 
-instance MonadBase IO m => MonadBase IO (SDLT s m) where
+instance MonadReflexCreateTrigger t m => MonadReflexCreateTrigger t (SDLT t m) where
+  newEventWithTrigger = lift . newEventWithTrigger
+  newFanEventWithTrigger initializer = lift $ newFanEventWithTrigger initializer
+
+instance MonadSubscribeEvent t m => MonadSubscribeEvent t (SDLT t m) where
+  subscribeEvent = lift . subscribeEvent
+
+instance MonadAppHost t m => MonadAppHost t (SDLT t m) where
+  getFireAsync = lift getFireAsync
+  getRunAppHost = do
+    runner <- SDLT getRunAppHost
+    return $ \m -> runner $ runSDLT m
+  performPostBuild_ = lift . performPostBuild_
+  liftHostFrame = lift . liftHostFrame
+
+instance MonadBase IO m => MonadBase IO (SDLT t m) where
   liftBase = SDLT . liftBase
 
-instance MonadResource m => MonadResource (SDLT s m) where
+instance MonadResource m => MonadResource (SDLT t m) where
   liftResourceT = SDLT . liftResourceT
 
-instance GameModule m s => GameModule (SDLT s m) (SDLState s) where
-  type ModuleState (SDLT s m) = SDLState s
-  runModule (SDLT m) s = do
-    s' <- processEvents s
-    clearWindows s'
-    ((a, s''), nextState) <- runModule (runStateT m s') (sdlNextState s')
-    drawWindows s''
-    return (a, flashSDLState $ s'' {
-        sdlNextState = nextState
-      })
+instance (MonadIO (HostFrame t), GameModule t m) => GameModule t (SDLT t m) where
+  type ModuleOptions t (SDLT t m) = ModuleOptions t m
 
-  newModuleState = emptySDLState <$> newModuleState
-  withModule _ io = do
+  runModule opts m = do
+    (windowShownEvent, fireWindowShownEvent) <- newExternalEvent
+    (windowHiddenEvent, fireWindowHiddenEvent) <- newExternalEvent
+    (windowExposedEvent, fireWindowExposedEvent) <- newExternalEvent
+    (windowMovedEvent, fireWindowMovedEvent) <- newExternalEvent
+    (windowResizedEvent, fireWindowResizedEvent) <- newExternalEvent
+    (windowSizeChangedEvent, fireWindowSizeChangedEvent) <- newExternalEvent
+    (windowMinimizedEvent, fireWindowMinimizedEvent) <- newExternalEvent
+    (windowMaximizedEvent, fireWindowMaximizedEvent) <- newExternalEvent
+    (windowRestoredEvent, fireWindowRestoredEvent) <- newExternalEvent
+    (windowGainedMouseFocusEvent, fireWindowGainedMouseFocusEvent) <- newExternalEvent
+    (windowLostMouseFocusEvent, fireWindowLostMouseFocusEvent) <- newExternalEvent
+    (windowGainedKeyboardFocusEvent, fireWindowGainedKeyboardFocusEvent) <- newExternalEvent
+    (windowLostKeyboardFocusEvent, fireWindowLostKeyboardFocusEvent) <- newExternalEvent
+    (windowClosedEvent, fireWindowClosedEvent) <- newExternalEvent
+    (keyboardEvent, fireKeyboardEvent) <- newExternalEvent
+    (textEditingEvent, fireTextEditingEvent) <- newExternalEvent
+    (textInputEvent, fireTextInputEvent) <- newExternalEvent
+    (mouseMotionEvent, fireMouseMotionEvent) <- newExternalEvent
+    (mouseButtonEvent, fireMouseButtonEvent) <- newExternalEvent
+    (mouseWheelEvent, fireMouseWheelEvent) <- newExternalEvent
+    (joyAxisEvent, fireJoyAxisEvent) <- newExternalEvent
+    (joyBallEvent, fireJoyBallEvent) <- newExternalEvent
+    (joyHatEvent, fireJoyHatEvent) <- newExternalEvent
+    (joyButtonEvent, fireJoyButtonEvent) <- newExternalEvent
+    (joyDeviceEvent, fireJoyDeviceEvent) <- newExternalEvent
+    (controllerAxisEvent, fireControllerAxisEvent) <- newExternalEvent
+    (controllerButtonEvent, fireControllerButtonEvent) <- newExternalEvent
+    (controllerDeviceEvent, fireControllerDeviceEvent) <- newExternalEvent
+    (quitEvent, fireQuitEvent) <- newExternalEvent
+    (userEvent, fireUserEvent) <- newExternalEvent
+    (sysWMEvent, fireSysWMEvent) <- newExternalEvent
+    (touchFingerEvent, fireTouchFingerEvent) <- newExternalEvent
+    (multiGestureEvent, fireMultiGestureEvent) <- newExternalEvent
+    (dollarGestureEvent, fireDollarGestureEvent) <- newExternalEvent
+    (dropEvent, fireDropEvent) <- newExternalEvent
+    (clipboardUpdateEvent, fireClipboardUpdateEvent) <- newExternalEvent
+
+    let s = SDLState {
+            sdlStateWindowShownEvent = windowShownEvent
+          , sdlStateWindowHiddenEvent = windowHiddenEvent
+          , sdlStateWindowExposedEvent = windowExposedEvent
+          , sdlStateWindowMovedEvent = windowMovedEvent
+          , sdlStateWindowResizedEvent = windowResizedEvent
+          , sdlStateWindowSizeChangedEvent = windowSizeChangedEvent
+          , sdlStateWindowMinimizedEvent = windowMinimizedEvent
+          , sdlStateWindowMaximizedEvent = windowMaximizedEvent
+          , sdlStateWindowRestoredEvent = windowRestoredEvent
+          , sdlStateWindowGainedMouseFocusEvent = windowGainedMouseFocusEvent
+          , sdlStateWindowLostMouseFocusEvent = windowLostMouseFocusEvent
+          , sdlStateWindowGainedKeyboardFocusEvent = windowGainedKeyboardFocusEvent
+          , sdlStateWindowLostKeyboardFocusEvent = windowLostKeyboardFocusEvent
+          , sdlStateWindowClosedEvent = windowClosedEvent
+          , sdlStateKeyboardEvent = keyboardEvent
+          , sdlStateTextEditingEvent = textEditingEvent
+          , sdlStateTextInputEvent = textInputEvent
+          , sdlStateMouseMotionEvent = mouseMotionEvent
+          , sdlStateMouseButtonEvent = mouseButtonEvent
+          , sdlStateMouseWheelEvent = mouseWheelEvent
+          , sdlStateJoyAxisEvent = joyAxisEvent
+          , sdlStateJoyBallEvent = joyBallEvent
+          , sdlStateJoyHatEvent = joyHatEvent
+          , sdlStateJoyButtonEvent = joyButtonEvent
+          , sdlStateJoyDeviceEvent = joyDeviceEvent
+          , sdlStateControllerAxisEvent = controllerAxisEvent
+          , sdlStateControllerButtonEvent = controllerButtonEvent
+          , sdlStateControllerDeviceEvent = controllerDeviceEvent
+          , sdlStateQuitEvent = quitEvent
+          , sdlStateUserEvent = userEvent
+          , sdlStateSysWMEvent = sysWMEvent
+          , sdlStateTouchFingerEvent = touchFingerEvent
+          , sdlStateMultiGestureEvent = multiGestureEvent
+          , sdlStateDollarGestureEvent = dollarGestureEvent
+          , sdlStateDropEvent = dropEvent
+          , sdlStateClipboardUpdateEvent = clipboardUpdateEvent
+          }
+
+    -- | Process single SDL event
+    let handleEvent e = case e of
+          WindowShownEvent d -> fireWindowShownEvent d
+          WindowHiddenEvent d -> fireWindowHiddenEvent d
+          WindowExposedEvent d -> fireWindowExposedEvent d
+          WindowMovedEvent d -> fireWindowMovedEvent d
+          WindowResizedEvent d -> fireWindowResizedEvent d
+          WindowSizeChangedEvent d -> fireWindowSizeChangedEvent d
+          WindowMinimizedEvent d -> fireWindowMinimizedEvent d
+          WindowMaximizedEvent d -> fireWindowMaximizedEvent d
+          WindowRestoredEvent d -> fireWindowRestoredEvent d
+          WindowGainedMouseFocusEvent d -> fireWindowGainedMouseFocusEvent d
+          WindowLostMouseFocusEvent d -> fireWindowLostMouseFocusEvent d
+          WindowGainedKeyboardFocusEvent d -> fireWindowGainedKeyboardFocusEvent d
+          WindowLostKeyboardFocusEvent d -> fireWindowLostKeyboardFocusEvent d
+          WindowClosedEvent d -> fireWindowClosedEvent d
+          KeyboardEvent d -> fireKeyboardEvent d
+          TextEditingEvent d -> fireTextEditingEvent d
+          TextInputEvent d -> fireTextInputEvent d
+          MouseMotionEvent d -> fireMouseMotionEvent d
+          MouseButtonEvent d -> fireMouseButtonEvent d
+          MouseWheelEvent d -> fireMouseWheelEvent d
+          JoyAxisEvent d -> fireJoyAxisEvent d
+          JoyBallEvent d -> fireJoyBallEvent d
+          JoyHatEvent d -> fireJoyHatEvent d
+          JoyButtonEvent d -> fireJoyButtonEvent d
+          JoyDeviceEvent d -> fireJoyDeviceEvent d
+          ControllerAxisEvent d -> fireControllerAxisEvent d
+          ControllerButtonEvent d -> fireControllerButtonEvent d
+          ControllerDeviceEvent d -> fireControllerDeviceEvent d
+          QuitEvent -> fireQuitEvent ()
+          UserEvent d -> fireUserEvent d
+          SysWMEvent d -> fireSysWMEvent d
+          TouchFingerEvent d -> fireTouchFingerEvent d
+          MultiGestureEvent d -> fireMultiGestureEvent d
+          DollarGestureEvent d -> fireDollarGestureEvent d
+          DropEvent d -> fireDropEvent d
+          ClipboardUpdateEvent d -> fireClipboardUpdateEvent d
+          _ -> return False
+
+    liftIO $ do
+      es <- pollEvents
+      mapM_ (void . handleEvent) (eventPayload <$> es)
+    runModule opts (runReaderT (runSDLT m) s)
+
+  withModule t _ io = do
     initializeAll
     liftIO $ putStrLn "SDL initialized"
-    withModule (Proxy :: Proxy m) io
-
-  cleanupModule _ = quit
-
--- | Takes all window and renderers and update them
-drawWindows :: MonadIO m => SDLState s -> m ()
-drawWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
-  where
-  go WindowInfo{..} = do
-    whenJust winfoContext . const . glSwapWindow $! winfoWindow
-    present winfoRenderer
-
--- | Clear surface of all windows
-clearWindows :: MonadIO m => SDLState s -> m ()
-clearWindows SDLState{..} = mapM_ go . H.elems $! sdlWindows
-  where
-  go WindowInfo{..} = case winfoColor of
-    Nothing -> return ()
-    Just c -> do
-      rendererDrawColor winfoRenderer $= c
-      clear winfoRenderer
-
--- | Catch all SDL events
-processEvents :: MonadIO m => SDLState s -> m (SDLState s)
-processEvents sdlState = do
-  es <- pollEvents
-  return $! F.foldl' process sdlState (eventPayload <$> es)
-  where
-  process s e = case e of
-    WindowShownEvent d -> s { sdlWindowShownEvents = sdlWindowShownEvents s S.|> d }
-    WindowHiddenEvent d -> s { sdlWindowHiddenEvents = sdlWindowHiddenEvents s S.|> d }
-    WindowExposedEvent d -> s { sdlWindowExposedEvents = sdlWindowExposedEvents s S.|> d }
-    WindowMovedEvent d -> s { sdlWindowMovedEvents = sdlWindowMovedEvents s S.|> d }
-    WindowResizedEvent d -> s { sdlWindowResizedEvents = sdlWindowResizedEvents s S.|> d }
-    WindowSizeChangedEvent d -> s { sdlWindowSizeChangedEvents = sdlWindowSizeChangedEvents s S.|> d }
-    WindowMinimizedEvent d -> s { sdlWindowMinimizedEvents = sdlWindowMinimizedEvents s S.|> d }
-    WindowMaximizedEvent d -> s { sdlWindowMaximizedEvents = sdlWindowMaximizedEvents s S.|> d }
-    WindowRestoredEvent d -> s { sdlWindowRestoredEvents = sdlWindowRestoredEvents s S.|> d }
-    WindowGainedMouseFocusEvent d -> s { sdlWindowGainedMouseFocusEvents = sdlWindowGainedMouseFocusEvents s S.|> d }
-    WindowLostMouseFocusEvent d -> s { sdlWindowLostMouseFocusEvents = sdlWindowLostMouseFocusEvents s S.|> d }
-    WindowGainedKeyboardFocusEvent d -> s { sdlWindowGainedKeyboardFocusEvents = sdlWindowGainedKeyboardFocusEvents s S.|> d }
-    WindowLostKeyboardFocusEvent d -> s { sdlWindowLostKeyboardFocusEvents = sdlWindowLostKeyboardFocusEvents s S.|> d }
-    WindowClosedEvent d -> s { sdlWindowClosedEvents = sdlWindowClosedEvents s S.|> d }
-    KeyboardEvent d -> s { sdlKeyboardEvents = sdlKeyboardEvents s S.|> d }
-    TextEditingEvent d -> s { sdlTextEditingEvents = sdlTextEditingEvents s S.|> d }
-    TextInputEvent d -> s { sdlTextInputEvents = sdlTextInputEvents s S.|> d }
-    MouseMotionEvent d -> s { sdlMouseMotionEvents = sdlMouseMotionEvents s S.|> d }
-    MouseButtonEvent d -> s { sdlMouseButtonEvents = sdlMouseButtonEvents s S.|> d }
-    MouseWheelEvent d -> s { sdlMouseWheelEvents = sdlMouseWheelEvents s S.|> d }
-    JoyAxisEvent d -> s { sdlJoyAxisEvents = sdlJoyAxisEvents s S.|> d }
-    JoyBallEvent d -> s { sdlJoyBallEvents = sdlJoyBallEvents s S.|> d }
-    JoyHatEvent d -> s { sdlJoyHatEvents = sdlJoyHatEvents s S.|> d }
-    JoyButtonEvent d -> s { sdlJoyButtonEvents = sdlJoyButtonEvents s S.|> d }
-    JoyDeviceEvent d -> s { sdlJoyDeviceEvents = sdlJoyDeviceEvents s S.|> d }
-    ControllerAxisEvent d -> s { sdlControllerAxisEvents = sdlControllerAxisEvents s S.|> d }
-    ControllerButtonEvent d -> s { sdlControllerButtonEvents = sdlControllerButtonEvents s S.|> d }
-    ControllerDeviceEvent d -> s { sdlControllerDeviceEvents = sdlControllerDeviceEvents s S.|> d }
-    QuitEvent -> s { sdlQuitEvent = True }
-    UserEvent d -> s { sdlUserEvents = sdlUserEvents s S.|> d }
-    SysWMEvent d -> s { sdlSysWMEvents = sdlSysWMEvents s S.|> d }
-    TouchFingerEvent d -> s { sdlTouchFingerEvents = sdlTouchFingerEvents s S.|> d }
-    MultiGestureEvent d -> s { sdlMultiGestureEvents = sdlMultiGestureEvents s S.|> d }
-    DollarGestureEvent d -> s { sdlDollarGestureEvents = sdlDollarGestureEvents s S.|> d }
-    DropEvent d -> s { sdlDropEvents = sdlDropEvents s S.|> d }
-    ClipboardUpdateEvent d -> s { sdlClipboardUpdateEvents = sdlClipboardUpdateEvents s S.|> d }
-    _ -> s
+    withModule t (Proxy :: Proxy m) io
