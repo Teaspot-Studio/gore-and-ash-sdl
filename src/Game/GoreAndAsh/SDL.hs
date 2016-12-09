@@ -45,9 +45,10 @@ type AppActor i a b = GameActor AppMonad i a b
 
 -}
 module Game.GoreAndAsh.SDL(
-  -- * Basic API
-    MonadSDL(..)
+    SDL'ModuleException(..)
   , SDLT
+  -- * Basic API
+  , MonadSDL(..)
   , WindowConfig(..)
   , RendererConfig(..)
   , RendererType(..)
@@ -60,6 +61,7 @@ module Game.GoreAndAsh.SDL(
   , windowCfgTitle
   , windowCfgConfig
   , windowCfgRendererConfig
+  , windowCfgCreateContext
   , windowCfgDestroy
   , windowCfgDraw
   , windowCfgHide
@@ -78,12 +80,16 @@ module Game.GoreAndAsh.SDL(
   , WindowWidget
   , windowWindow
   , windowRenderer
+  , windowContextCreated
+  , windowDrawn
+  , windowConf
   , windowShown
   , windowHidden
   , windowExposed
   , windowMoved
   , windowResized
   , windowSizeChanged
+  , windowSizeDyn
   , windowMinimized
   , windowMaximized
   , windowRestored
@@ -99,6 +105,7 @@ module Game.GoreAndAsh.SDL(
   , windowMouseButtonEvent
   , windowMouseWheelEvent
   , windowUserEvent
+  , windowNeedRedraw
   -- * High-level API wrappers
   , keyScancode
   , keyPress
@@ -108,6 +115,7 @@ module Game.GoreAndAsh.SDL(
   , mouseScrollX
   , mouseScrollY
   , mouseClick
+  , createMainWindow
   ) where
 
 -- imports for docs
@@ -123,3 +131,4 @@ import SDL as ReExport hiding (get, Event)
 import Game.GoreAndAsh.SDL.API as X
 import Game.GoreAndAsh.SDL.Module as X
 import Game.GoreAndAsh.SDL.State as X
+import Game.GoreAndAsh.SDL.Window as X

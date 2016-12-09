@@ -15,14 +15,14 @@ module Game.GoreAndAsh.SDL.Module(
     SDLT(..)
   ) where
 
+import Control.Concurrent
 import Control.Monad.Base
 import Control.Monad.Catch
 import Control.Monad.Error.Class
 import Control.Monad.Fix
 import Control.Monad.IO.Class
-import Control.Monad.State.Strict
-import Control.Monad.Trans.Resource
 import Control.Monad.Reader
+import Control.Monad.Trans.Resource
 import Data.Proxy
 import SDL
 
@@ -195,9 +195,9 @@ instance (MonadIO (HostFrame t), GameModule t m) => GameModule t (SDLT t m) wher
           ClipboardUpdateEvent d -> fireClipboardUpdateEvent d
           _ -> return False
 
-    liftIO $ do
-      es <- pollEvents
-      mapM_ (void . handleEvent) (eventPayload <$> es)
+    _ <- liftIO $ forkOS $ forever $ do
+      e <- waitEvent
+      void . handleEvent . eventPayload $ e
     runModule opts (runReaderT (runSDLT m) s)
 
   withModule t _ io = do
