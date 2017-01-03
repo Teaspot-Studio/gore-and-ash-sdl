@@ -47,7 +47,7 @@ import Game.GoreAndAsh.SDL.State
 import Game.GoreAndAsh.SDL.Window
 
 -- | API of the module
-class (MonadIO m, MonadAppHost t m, MonadFix m, MonadError SDL'ModuleException m) => MonadSDL t m | m -> t where
+class (MonadIO m, MonadAppHost t m, MonadFix m) => MonadSDL t m | m -> t where
   -- | Creates new window widget
   sdlCreateWindow :: WindowWidgetConf t -> m (WindowWidget t)
 
@@ -284,7 +284,7 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
   {-# INLINE sdlDropEvent #-}
   {-# INLINE sdlClipboardUpdateEvent #-}
 
-instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadAppHost t (mt m), MonadFix (mt m), MonadError SDL'ModuleException (mt m), MonadSDL t m, MonadTrans mt) => MonadSDL t (mt m) where
+instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadAppHost t (mt m), MonadFix (mt m), MonadSDL t m, MonadTrans mt) => MonadSDL t (mt m) where
   sdlCreateWindow cfg = lift $ sdlCreateWindow cfg
 
   sdlWindowShownEvent = lift sdlWindowShownEvent
@@ -424,15 +424,19 @@ mouseClick widg mb = pushAlways convertCoords btnE
 -- | Create a main window with given initial confit, that is redrawn each time
 -- the window is resized/maximized/restored/etc and if it is closed the application
 -- gets signal to shutdown.
-createMainWindow :: MonadSDL t m => WindowDrawer t -> WindowWidgetConf t -> m (WindowWidget t)
-createMainWindow draw cfg = do
+createMainWindow :: MonadSDL t m
+  => Event t () -- ^ Window redraw event
+  -> WindowDrawer t -- ^ How to redraw window (including resizing and other additional causes of redraw)
+  -> WindowWidgetConf t -- ^ Config to use
+  -> m (WindowWidget t)
+createMainWindow redrawE draw cfg = do
   buildE <- getPostBuild
   rec
     let cfg' = cfg
           & windowCfgDraw .~ fmap (const draw) drawE
           & windowCfgDestroy .~ _windowClosed w
     w <- sdlCreateWindow cfg'
-    let drawE = leftmost [windowNeedRedraw w, buildE]
+    let drawE = leftmost [windowNeedRedraw w, redrawE, buildE]
 
   let whenQuit = infoQuit [
           _windowCfgDestroy cfg

@@ -18,7 +18,6 @@ deriving instance (ReflexHost t, MonadCatch (HostFrame t)) => MonadCatch (AppMon
 deriving instance (ReflexHost t, MonadThrow (HostFrame t)) => MonadThrow (AppMonad t)
 deriving instance (ReflexHost t, MonadMask (HostFrame t)) => MonadMask (AppMonad t)
 deriving instance (ReflexHost t, MonadIO (HostFrame t)) => MonadIO (AppMonad t)
-deriving instance (ReflexHost t, MonadCatch (HostFrame t)) => MonadError SDL'ModuleException (AppMonad t)
 deriving instance (ReflexHost t, MonadIO (HostFrame t), MonadCatch (HostFrame t)) => MonadSDL t (AppMonad t)
 deriving instance (ReflexHost t, MonadIO (HostFrame t)) => LoggingMonad t (AppMonad t)
 deriving instance (ReflexHost t) => MonadSample t (AppMonad t)
