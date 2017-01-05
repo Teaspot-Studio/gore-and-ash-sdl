@@ -22,6 +22,7 @@ import Control.Monad.Error.Class
 import Control.Monad.Fix
 import Control.Monad.IO.Class
 import Control.Monad.Reader
+import Control.Monad.Trans.Control
 import Control.Monad.Trans.Resource
 import Data.Proxy
 import SDL
@@ -69,8 +70,18 @@ instance MonadAppHost t m => MonadAppHost t (SDLT t m) where
   performPostBuild_ = lift . performPostBuild_
   liftHostFrame = lift . liftHostFrame
 
-instance MonadBase IO m => MonadBase IO (SDLT t m) where
+instance MonadTransControl (SDLT t) where
+  type StT (SDLT t) a = StT (ReaderT (SDLState t)) a
+  liftWith = defaultLiftWith SDLT runSDLT
+  restoreT = defaultRestoreT SDLT
+
+instance MonadBase b m => MonadBase b (SDLT t m) where
   liftBase = SDLT . liftBase
+
+instance (MonadBaseControl b m) => MonadBaseControl b (SDLT t m) where
+  type StM (SDLT t m) a = ComposeSt (SDLT t) m a
+  liftBaseWith     = defaultLiftBaseWith
+  restoreM         = defaultRestoreM
 
 instance MonadResource m => MonadResource (SDLT t m) where
   liftResourceT = SDLT . liftResourceT
