@@ -92,7 +92,8 @@ data WindowWidgetConf t = WindowWidgetConf {
 , _windowCfgDestroy :: Event t ()
   -- | When the window GL context is created (implementation takes only the first occurence of the event)
 , _windowCfgCreateContext :: Event t ()
-  -- | How to draw the window, each time the event fires the window is redrawn
+  -- | How to draw the window, each time the event fires the window is redrawn.
+  -- User should make GL context current and buffer swapping by herself.
 , _windowCfgDraw :: Event t (WindowDrawer t)
   -- | The window is hidden when the event fires
 , _windowCfgHide :: Event t ()
@@ -161,6 +162,8 @@ data WindowWidget t = WindowWidget {
 , _windowSizeDyn :: Dynamic t (V2 Int)
   -- | Fired when a GL context is created for the window
 , _windowContextCreated :: Event t GLContext
+  -- | Holds current value of GL context for the window
+, _windowContext :: Dynamic t (Maybe GLContext)
   -- | Fires when the window is rerendered
 , _windowDrawn :: Event t ()
   -- | Fires when the window is shown

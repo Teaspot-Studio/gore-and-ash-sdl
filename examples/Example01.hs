@@ -43,7 +43,7 @@ instance (ReflexHost t, MonadIO (HostFrame t)) => MonadAppHost t (AppMonad t) wh
 
 drawFrame :: forall t . (ReflexHost t, MonadIO (HostFrame t))
   => Window -> Renderer -> HostFrame t ()
-drawFrame _ r = do
+drawFrame w r = do
   rendererDrawColor r $= V4 0 0 0 0
   clear r
   rendererDrawColor r $= V4 250 0 0 0
@@ -51,6 +51,7 @@ drawFrame _ r = do
   let squareRect :: Rectangle Double
       squareRect = Rectangle (P $ V2 0.1 0.1) (V2 0.8 0.8)
   fillRect r (Just $ resizeRect ws squareRect)
+  updateWindowSurface w
   where
     getCurrentSize :: HostFrame t (V2 CInt)
     getCurrentSize = do

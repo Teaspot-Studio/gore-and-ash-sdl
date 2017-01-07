@@ -144,9 +144,9 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
     -- Create context on demand and watch current value of it
     createContextEvent <- headE _windowCfgCreateContext -- don't create twice
     _windowContextCreated <- performEvent $ ffor createContextEvent $ const $ glCreateContext w
-    contextB <- hold Nothing $ fmap Just _windowContextCreated
+    _windowContext <- holdDyn Nothing $ fmap Just _windowContextCreated
     let whenContext m = do
-          mcontext <- sample contextB
+          mcontext <- sample . current $ _windowContext
           whenJust mcontext m
 
     -- Destroy context, renderer and window itself
@@ -155,11 +155,8 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
       destroyRenderer r
       destroyWindow w
 
-    -- Select context (if any), perform draw and then swap buffers
-    _windowDrawn <- performEvent $ ffor _windowCfgDraw $ \draw -> do
-      whenContext (glMakeCurrent w)
-      draw w r
-      glSwapWindow w
+    -- Select context (if any), perform draw. Swapping and context selection user do herself
+    _windowDrawn <- performEvent $ ffor _windowCfgDraw $ \draw -> draw w r
 
     performEvent_ $ ffor (updated _windowCfgTitle) (windowTitle w $=)
     performEvent_ $ ffor _windowCfgHide $ const $ hideWindow w
