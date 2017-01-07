@@ -37,6 +37,7 @@ module Game.GoreAndAsh.SDL.Window(
   , windowWindow
   , windowRenderer
   , windowContextCreated
+  , windowContext
   , windowDrawn
   , windowConf
   , windowShown
