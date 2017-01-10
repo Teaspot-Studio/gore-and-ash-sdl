@@ -51,7 +51,7 @@ drawFrame win r = do
   let squareRect :: Rectangle Double
       squareRect = Rectangle (P $ V2 0.1 0.1) (V2 0.8 0.8)
   fillRect r (Just $ resizeRect ws squareRect)
-  updateWindowSurface win
+  glSwapWindow win
   where
     getCurrentSize :: HostFrame t (V2 CInt)
     getCurrentSize = do
