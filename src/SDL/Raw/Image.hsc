@@ -82,6 +82,10 @@ liftF "getVersion" "IMG_Linked_Version"
 
 type InitFlags = CInt
 
+pattern IMG_INIT_JPG :: (Num a, Eq a) => a
+pattern IMG_INIT_PNG :: (Num a, Eq a) => a
+pattern IMG_INIT_TIF :: (Num a, Eq a) => a
+pattern IMG_INIT_WEBP :: (Num a, Eq a) => a
 pattern IMG_INIT_JPG  = #{const IMG_INIT_JPG}
 pattern IMG_INIT_PNG  = #{const IMG_INIT_PNG}
 pattern IMG_INIT_TIF  = #{const IMG_INIT_TIF}
