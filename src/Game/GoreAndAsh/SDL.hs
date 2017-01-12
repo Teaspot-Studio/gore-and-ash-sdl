@@ -115,6 +115,10 @@ module Game.GoreAndAsh.SDL(
   , mouseScrollX
   , mouseScrollY
   , mouseClick
+  , mouseRelease
+  , mousePosition
+  , mousePress
+  , mouseClickPress
   , createMainWindow
   ) where
 

@@ -26,7 +26,12 @@ module Game.GoreAndAsh.SDL.API(
   , mouseScroll
   , mouseScrollX
   , mouseScrollY
+  , mouseButtonEvent
   , mouseClick
+  , mouseRelease
+  , mousePosition
+  , mousePress
+  , mouseClickPress
   , createMainWindow
   ) where
 
@@ -39,9 +44,10 @@ import Data.Int
 import Linear
 import Linear.Affine
 
-import SDL as ReExport hiding (get, Event)
+import SDL as ReExport hiding (get, Event, delay)
 
 import Game.GoreAndAsh
+import Game.GoreAndAsh.Time
 import Game.GoreAndAsh.SDL.Module
 import Game.GoreAndAsh.SDL.State
 import Game.GoreAndAsh.SDL.Window
@@ -402,21 +408,72 @@ mouseScrollX = fmap (^. _x) . mouseScroll
 mouseScrollY :: Reflex t => WindowWidget t -> Event t Int32
 mouseScrollY = fmap (^. _y) . mouseScroll
 
+-- | Transform coordinates to [-1 .. 1] range.
+convertCoords :: (Reflex t, MonadSample t m) => WindowWidget t -> Point V2 Int32 -> m (V2 Double)
+convertCoords win (P (V2 xi yi)) = do
+  V2 w h <- sample (current $ _windowSizeDyn win)
+  return $ inv33 (viewportTransform2D 0 (V2 (fromIntegral w) (fromIntegral h)))
+    `applyTransform2D`
+    V2 (fromIntegral xi) (fromIntegral yi)
+
+-- | Fires when user press or release mouse button within given window.
+-- Click coordinates are in [-1 .. 1] range.
+mouseButtonEvent :: Reflex t => WindowWidget t -> MouseButton -> InputMotion -> Event t (V2 Double)
+mouseButtonEvent win mb motion = pushAlways (convertCoords win) $ fmap mouseButtonEventPos btnE
+  where
+    btnE = ffilter isNeeded $ _windowMouseButtonEvent win
+    isNeeded MouseButtonEventData{..} = mouseButtonEventButton == mb && mouseButtonEventMotion == motion
+
 -- | Fires when user clicks within window. Click coordinates are in [-1 .. 1] range
 mouseClick :: Reflex t => WindowWidget t -> MouseButton -> Event t (V2 Double)
-mouseClick widg mb = pushAlways convertCoords btnE
+mouseClick win mb = mouseButtonEvent win mb Pressed
+
+-- | Fires when user releases mouse button. Click coordinates are in [-1 .. 1] range
+mouseRelease :: Reflex t => WindowWidget t -> MouseButton -> Event t (V2 Double)
+mouseRelease win mb = mouseButtonEvent win mb Released
+
+-- | Dynamic of mouse position in window. Coordinates are in [-1 .. 1] range
+mousePosition :: (MonadHold t m, Reflex t) => WindowWidget t -> m (Dynamic t (V2 Double))
+mousePosition win = holdDyn 0 (pushAlways (convertCoords win) posE)
   where
-    btnE = ffilter isNeeded $ _windowMouseButtonEvent widg
-    isNeeded MouseButtonEventData{..} = mouseButtonEventButton == mb && mouseButtonEventMotion == Pressed
+    posE = mouseMotionEventPos <$> _windowMouseMotionEvent win
 
-    convertCoords MouseButtonEventData{..} = do
-      size <- sample (current $ _windowSizeDyn widg)
-      return $ transformCoords size mouseButtonEventPos
+-- | Return dynamic that contains positions of cursor between press and release of mouse button
+mousePress :: (MonadHold t m, Reflex t) => WindowWidget t -> MouseButton -> m (Dynamic t (Maybe (V2 Double)))
+mousePress w mb = holdDyn Nothing (leftmost [posE, clickE, releaseE])
+  where
+    clickE = Just <$> mouseClick w mb
+    releaseE = const Nothing <$> mouseRelease w mb
+    posE = flip pushAlways (_windowMouseMotionEvent w) $ \MouseMotionEventData{..} ->
+      if mb `elem` mouseMotionEventState
+        then Just <$> convertCoords w mouseMotionEventPos
+        else return Nothing
 
-    transformCoords (V2 w h) (P (V2 xi yi)) =
-      inv33 (viewportTransform2D 0 (V2 (fromIntegral w) (fromIntegral h)))
-      `applyTransform2D`
-      V2 (fromIntegral xi) (fromIntegral yi)
+-- | Generate event that fires with given rate when user holds mouse button
+mouseClickPress :: (TimerMonad t m, MonadAppHost t m)
+  => WindowWidget t -- ^ Window the event is triggers for
+  -> MouseButton -- ^ Which mouse button to track
+  -> Int -- ^ How much occurences per second to do
+  -> m (Event t (V2 Double))
+mouseClickPress w mb fps = do
+  pressDyn <- mousePress w mb
+  oldPress <- delay Nothing pressDyn
+  let
+    startPressE = flip push (updated pressDyn) $ \mv -> do
+      oldMv <- sample . current $ oldPress
+      return $ case (oldMv, mv) of
+        (Nothing, Just _) -> Just ()
+        _ -> Nothing
+    endPressE = flip push (updated pressDyn) $ \mv -> do
+      oldMv <- sample . current $ oldPress
+      return $ case (oldMv, mv) of
+        (Just _, Nothing) -> Just ()
+        _ -> Nothing
+    tickDt = 1 / (fromIntegral fps :: Double)
+    mkTick = tickEveryUntil (realToFrac tickDt) endPressE
+  tickE <- switchPromptlyDyn <$> holdAppHost (pure never) (const mkTick <$> startPressE)
+  let holdE = fmapMaybe id $ current pressDyn `tag` tickE
+  return $ leftmost [holdE, mouseClick w mb]
 
 -- | Create a main window with given initial confit, that is redrawn each time
 -- the window is resized/maximized/restored/etc and if it is closed the application
