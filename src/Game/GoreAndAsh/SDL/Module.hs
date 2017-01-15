@@ -166,7 +166,7 @@ instance (MonadIO (HostFrame t), GameModule t m) => GameModule t (SDLT t m) wher
           , sdlStateClipboardUpdateEvent = clipboardUpdateEvent
           }
 
-    -- | Process single SDL event
+    -- Process single SDL event
     let handleEvent e = case e of
           WindowShownEvent d -> fireWindowShownEvent d
           WindowHiddenEvent d -> fireWindowHiddenEvent d

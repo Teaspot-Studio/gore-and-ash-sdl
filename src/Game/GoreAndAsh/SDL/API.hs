@@ -178,7 +178,7 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
     performEvent_ $ ffor _windowCfgWindowMode (setWindowMode w)
     performEvent_ $ ffor _windowCfgPosition (setWindowPosition w)
 
-    -- | Transforms and filters event
+    -- Transforms and filters event
     let filterEvent :: Functor f => (a -> Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
         filterEvent getter f = fmap (fmap f . ffilter ((== w) . getter))
 
