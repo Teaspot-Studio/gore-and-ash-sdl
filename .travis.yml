@@ -22,8 +22,12 @@ cache:
 # Ensure necessary system libraries are present
 addons:
   apt:
+    sources:
+      - sourceline: 'ppa:zoogie/sdl2-snapshots'
     packages:
       - libgmp-dev
+      - libsdl2-dev
+      - libsdl2-image-dev
 
 before_install:
 # Download and unpack the stack executable
@@ -33,6 +37,7 @@ before_install:
 
 install:
 # Build dependencies
+- stack install alex happy
 - stack --no-terminal --install-ghc test --only-dependencies
 
 script:
