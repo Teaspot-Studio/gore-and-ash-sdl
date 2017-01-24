@@ -61,7 +61,6 @@ module Game.GoreAndAsh.SDL(
   , windowCfgTitle
   , windowCfgConfig
   , windowCfgRendererConfig
-  , windowCfgCreateContext
   , windowCfgDestroy
   , windowCfgDraw
   , windowCfgHide
@@ -80,7 +79,7 @@ module Game.GoreAndAsh.SDL(
   , WindowWidget
   , windowWindow
   , windowRenderer
-  , windowContextCreated
+  , windowContext
   , windowDrawn
   , windowConf
   , windowShown

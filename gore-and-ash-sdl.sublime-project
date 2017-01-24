@@ -23,7 +23,7 @@
     },
     {
       "name": "Stack pedantic examples",
-      "shell_cmd": "stack install --pedantic --flag --flag gore-and-ash-sdl:examples",
+      "shell_cmd": "stack install --pedantic --flag gore-and-ash-sdl:examples",
       "working_dir": "${project_path}"
     }
   ],

@@ -38,7 +38,6 @@ module Game.GoreAndAsh.SDL.API(
 import Control.Lens ((^.), (&), (.~))
 import Control.Monad.Catch
 import Control.Monad.Except
-import Control.Monad.Extra (whenJust)
 import Control.Monad.Reader
 import Data.Int
 import Linear
@@ -145,23 +144,16 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
   sdlCreateWindow cfg@WindowWidgetConf{..} = do
     initTitle <- sample (current _windowCfgTitle)
     w <- createWindow initTitle _windowCfgConfig
+    _windowContext <- glCreateContext w
     r <- createRenderer w (-1) _windowCfgRendererConfig
-
-    -- Create context on demand and watch current value of it
-    createContextEvent <- headE _windowCfgCreateContext -- don't create twice
-    _windowContextCreated <- performEvent $ ffor createContextEvent $ const $ glCreateContext w
-    _windowContext <- holdDyn Nothing $ fmap Just _windowContextCreated
-    let whenContext m = do
-          mcontext <- sample . current $ _windowContext
-          whenJust mcontext m
 
     -- Destroy context, renderer and window itself
     performEvent_ $ ffor _windowCfgDestroy $ const $ do
-      whenContext glDeleteContext
+      glDeleteContext _windowContext
       destroyRenderer r
       destroyWindow w
 
-    -- Select context (if any), perform draw. Swapping and context selection user do herself
+    -- Select context (if any), perform draw. Swapping user do hisself
     _windowDrawn <- performEvent $ ffor _windowCfgDraw $ \draw -> draw w r
 
     performEvent_ $ ffor (updated _windowCfgTitle) (windowTitle w $=)

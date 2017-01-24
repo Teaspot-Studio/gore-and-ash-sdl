@@ -17,7 +17,6 @@ module Game.GoreAndAsh.SDL.Window(
   , windowCfgTitle
   , windowCfgConfig
   , windowCfgRendererConfig
-  , windowCfgCreateContext
   , windowCfgDestroy
   , windowCfgDraw
   , windowCfgHide
@@ -36,7 +35,6 @@ module Game.GoreAndAsh.SDL.Window(
   , WindowWidget(..)
   , windowWindow
   , windowRenderer
-  , windowContextCreated
   , windowContext
   , windowDrawn
   , windowConf
@@ -91,8 +89,6 @@ data WindowWidgetConf t = WindowWidgetConf {
 , _windowCfgRendererConfig :: RendererConfig
   -- | When to destroy the window
 , _windowCfgDestroy :: Event t ()
-  -- | When the window GL context is created (implementation takes only the first occurence of the event)
-, _windowCfgCreateContext :: Event t ()
   -- | How to draw the window, each time the event fires the window is redrawn.
   -- User should make GL context current and buffer swapping by herself.
 , _windowCfgDraw :: Event t (WindowDrawer t)
@@ -135,7 +131,6 @@ defaultWindowCfg = WindowWidgetConf {
     }
   , _windowCfgRendererConfig = defaultRenderer
   , _windowCfgDestroy = never
-  , _windowCfgCreateContext = never
   , _windowCfgDraw = never
   , _windowCfgHide = never
   , _windowCfgRaise = never
@@ -157,14 +152,12 @@ data WindowWidget t = WindowWidget {
   _windowWindow :: Window
   -- | Window SDL renderer
 , _windowRenderer :: Renderer
+  -- | Holds GL context for the window
+, _windowContext :: GLContext
   -- | Configuration that was used to create the window
 , _windowConf :: WindowWidgetConf t
   -- | Tracks current size of window
 , _windowSizeDyn :: Dynamic t (V2 Int)
-  -- | Fired when a GL context is created for the window
-, _windowContextCreated :: Event t GLContext
-  -- | Holds current value of GL context for the window
-, _windowContext :: Dynamic t (Maybe GLContext)
   -- | Fires when the window is rerendered
 , _windowDrawn :: Event t ()
   -- | Fires when the window is shown
@@ -222,7 +215,6 @@ windowNeedRedraw w = leftmost [
     nulify $ _windowResized w
   , nulify $ _windowShown w
   , nulify $ _windowExposed w
-  , nulify $ _windowContextCreated w
   , nulify $ _windowExposed w
   , nulify $ _windowRestored w
   ]
