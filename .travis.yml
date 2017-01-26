@@ -28,6 +28,7 @@ addons:
       - libgmp-dev
       - libsdl2-dev
       - libsdl2-image-dev
+      - libxxf86vm-dev
 
 before_install:
 # Download and unpack the stack executable
