@@ -138,7 +138,7 @@ class (MonadIO m, MonadAppHost t m, MonadFix m) => MonadSDL t m | m -> t where
   -- | Getting file opened event
   sdlDropEvent :: m (Event t DropEventData)
   -- | Getting clipboard changed event
-  sdlClipboardUpdateEvent :: m (Event t ClipboardUpdateEventData)
+  sdlClipboardUpdateEvent :: m (Event t ())
 
 instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => MonadSDL t (SDLT t m) where
   sdlCreateWindow cfg@WindowWidgetConf{..} = do

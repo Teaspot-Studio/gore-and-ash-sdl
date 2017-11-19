@@ -72,5 +72,5 @@ data SDLState t = SDLState {
 , sdlStateMultiGestureEvent :: !(Event t MultiGestureEventData)
 , sdlStateDollarGestureEvent :: !(Event t DollarGestureEventData)
 , sdlStateDropEvent :: !(Event t DropEventData)
-, sdlStateClipboardUpdateEvent :: !(Event t ClipboardUpdateEventData)
+, sdlStateClipboardUpdateEvent :: !(Event t ())
 } deriving (Generic)

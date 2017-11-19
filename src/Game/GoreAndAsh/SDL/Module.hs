@@ -203,7 +203,7 @@ instance (MonadIO (HostFrame t), GameModule t m) => GameModule t (SDLT t m) wher
           MultiGestureEvent d -> fireMultiGestureEvent d
           DollarGestureEvent d -> fireDollarGestureEvent d
           DropEvent d -> fireDropEvent d
-          ClipboardUpdateEvent d -> fireClipboardUpdateEvent d
+          ClipboardUpdateEvent -> fireClipboardUpdateEvent ()
           _ -> return False
 
     _ <- liftIO $ forkOS $ forever $ do
