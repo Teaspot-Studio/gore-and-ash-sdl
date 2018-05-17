@@ -174,6 +174,9 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
     let filterEvent :: Functor f => (a -> Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
         filterEvent getter f = fmap (fmap f . ffilter ((== w) . getter))
 
+        filterEventM :: Functor f => (a -> Maybe Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
+        filterEventM getter f = fmap (fmap f . ffilter ((== Just w) . getter))
+
     _windowShown <- filterEvent windowShownEventWindow (const ()) sdlWindowShownEvent
     _windowHidden <- filterEvent windowHiddenEventWindow (const ()) sdlWindowHiddenEvent
     _windowExposed <- filterEvent windowExposedEventWindow (const ()) sdlWindowExposedEvent
@@ -188,13 +191,13 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
     _windowGainedKeyboardFocus <- filterEvent windowGainedKeyboardFocusEventWindow (const ()) sdlWindowGainedKeyboardFocusEvent
     _windowLostKeyboardFocus <- filterEvent windowLostKeyboardFocusEventWindow (const ()) sdlWindowLostKeyboardFocusEvent
     _windowClosed <- filterEvent windowClosedEventWindow (const ()) sdlWindowClosedEvent
-    _windowKeyboardEvent <- filterEvent keyboardEventWindow id sdlKeyboardEvent
-    _windowTextEditingEvent <- filterEvent textEditingEventWindow id sdlTextEditingEvent
-    _windowTextInputEvent <- filterEvent textInputEventWindow id sdlTextInputEvent
-    _windowMouseMotionEvent <- filterEvent mouseMotionEventWindow id sdlMouseMotionEvent
-    _windowMouseButtonEvent <- filterEvent mouseButtonEventWindow id sdlMouseButtonEvent
-    _windowMouseWheelEvent <- filterEvent mouseWheelEventWindow id sdlMouseWheelEvent
-    _windowUserEvent <- filterEvent userEventWindow id sdlUserEvent
+    _windowKeyboardEvent <- filterEventM keyboardEventWindow id sdlKeyboardEvent
+    _windowTextEditingEvent <- filterEventM textEditingEventWindow id sdlTextEditingEvent
+    _windowTextInputEvent <- filterEventM textInputEventWindow id sdlTextInputEvent
+    _windowMouseMotionEvent <- filterEventM mouseMotionEventWindow id sdlMouseMotionEvent
+    _windowMouseButtonEvent <- filterEventM mouseButtonEventWindow id sdlMouseButtonEvent
+    _windowMouseWheelEvent <- filterEventM mouseWheelEventWindow id sdlMouseWheelEvent
+    _windowUserEvent <- filterEventM userEventWindow id sdlUserEvent
 
     let initialSize = fmap fromIntegral . windowInitialSize $ _windowCfgConfig
     _windowSizeDyn <- holdDyn initialSize _windowResized
