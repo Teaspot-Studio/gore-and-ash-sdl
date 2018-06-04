@@ -35,9 +35,9 @@ module Game.GoreAndAsh.SDL.API(
   , createMainWindow
   ) where
 
+import Control.Concurrent
 import Control.Lens ((^.), (&), (.~))
-import Control.Monad.Catch
-import Control.Monad.Except
+import Control.Monad.Extra
 import Control.Monad.Reader
 import Data.Int
 import Linear
@@ -52,7 +52,7 @@ import Game.GoreAndAsh.SDL.State
 import Game.GoreAndAsh.SDL.Window
 
 -- | API of the module
-class (MonadIO m, MonadAppHost t m, MonadFix m) => MonadSDL t m | m -> t where
+class (MonadIO m, MonadGame t m, MonadFix m) => MonadSDL t m | m -> t where
   -- | Creates new window widget
   sdlCreateWindow :: WindowWidgetConf t -> m (WindowWidget t)
 
@@ -140,21 +140,22 @@ class (MonadIO m, MonadAppHost t m, MonadFix m) => MonadSDL t m | m -> t where
   -- | Getting clipboard changed event
   sdlClipboardUpdateEvent :: m (Event t ())
 
-instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => MonadSDL t (SDLT t m) where
+instance {-# OVERLAPPING #-} (MonadIO m, MonadGame t m) => MonadSDL t (SDLT t m) where
   sdlCreateWindow cfg@WindowWidgetConf{..} = do
     initTitle <- sample (current _windowCfgTitle)
     w <- createWindow initTitle _windowCfgConfig
-    _windowContext <- glCreateContext w
-    r <- createRenderer w (-1) _windowCfgRendererConfig
+    (_windowContext, mr) <- case windowOpenGL _windowCfgConfig of
+      Nothing ->  (,) <$> pure Nothing <*> (fmap Just $ createRenderer w (-1) _windowCfgRendererConfig)
+      Just _ -> (,) <$> (fmap Just $ glCreateContext w) <*> pure Nothing
 
     -- Destroy context, renderer and window itself
     performEvent_ $ ffor _windowCfgDestroy $ const $ do
-      glDeleteContext _windowContext
-      destroyRenderer r
+      whenJust _windowContext glDeleteContext
+      whenJust mr destroyRenderer
       destroyWindow w
 
-    -- Select context (if any), perform draw. Swapping user do hisself
-    _windowDrawn <- performEvent $ ffor _windowCfgDraw $ \draw -> draw w r
+    -- Select context (if any), perform draw. Swapping users do theirself
+    _windowDrawn <- performInMainThread $ ffor _windowCfgDraw $ \draw -> draw w mr
 
     performEvent_ $ ffor (updated _windowCfgTitle) (windowTitle w $=)
     performEvent_ $ ffor _windowCfgHide $ const $ hideWindow w
@@ -203,7 +204,7 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
     _windowSizeDyn <- holdDyn initialSize _windowResized
 
     let _windowWindow = w
-        _windowRenderer = r
+        _windowRenderer = mr
         _windowConf = cfg
     return WindowWidget{..}
 
@@ -282,7 +283,7 @@ instance {-# OVERLAPPING #-} (MonadIO m, MonadCatch m, MonadAppHost t m) => Mona
   {-# INLINE sdlDropEvent #-}
   {-# INLINE sdlClipboardUpdateEvent #-}
 
-instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadAppHost t (mt m), MonadFix (mt m), MonadSDL t m, MonadTrans mt) => MonadSDL t (mt m) where
+instance {-# OVERLAPPABLE #-} (MonadIO (mt m), MonadGame t (mt m), MonadFix (mt m), MonadSDL t m, MonadTrans mt) => MonadSDL t (mt m) where
   sdlCreateWindow cfg = lift $ sdlCreateWindow cfg
 
   sdlWindowShownEvent = lift sdlWindowShownEvent
@@ -445,14 +446,14 @@ mousePress w mb = holdDyn Nothing (leftmost [posE, clickE, releaseE])
         else return Nothing
 
 -- | Generate event that fires with given rate when user holds mouse button
-mouseClickPress :: (TimerMonad t m, MonadAppHost t m)
-  => WindowWidget t -- ^ Window the event is triggers for
+mouseClickPress :: MonadGame t m
+  => WindowWidget t-- ^ Window the event is triggers for
   -> MouseButton -- ^ Which mouse button to track
   -> Int -- ^ How much occurences per second to do
   -> m (Event t (V2 Double))
 mouseClickPress w mb fps = do
   pressDyn <- mousePress w mb
-  oldPress <- delay Nothing pressDyn
+  oldPress <- delayWith Nothing pressDyn
   let
     startPressE = flip push (updated pressDyn) $ \mv -> do
       oldMv <- sample . current $ oldPress
@@ -466,7 +467,7 @@ mouseClickPress w mb fps = do
         _ -> Nothing
     tickDt = 1 / (fromIntegral fps :: Double)
     mkTick = tickEveryUntil (realToFrac tickDt) endPressE
-  tickE <- switchPromptlyDyn <$> holdAppHost (pure never) (const mkTick <$> startPressE)
+  tickE <- switch . current <$> networkHold (pure never) (const mkTick <$> startPressE)
   let holdE = fmapMaybe id $ current pressDyn `tag` tickE
   return $ leftmost [holdE, mouseClick w mb]
 
@@ -475,7 +476,7 @@ mouseClickPress w mb fps = do
 -- gets signal to shutdown.
 createMainWindow :: MonadSDL t m
   => Event t () -- ^ Window redraw event
-  -> WindowDrawer t -- ^ How to redraw window (including resizing and other additional causes of redraw)
+  -> WindowDrawer -- ^ How to redraw window (including resizing and other additional causes of redraw)
   -> WindowWidgetConf t -- ^ Config to use
   -> m (WindowWidget t)
 createMainWindow redrawE draw cfg = do
@@ -487,8 +488,7 @@ createMainWindow redrawE draw cfg = do
     w <- sdlCreateWindow cfg'
     let drawE = leftmost [windowNeedRedraw w, redrawE, buildE]
 
-  let whenQuit = infoQuit [
-          _windowCfgDestroy cfg
-        , _windowClosed w]
-  _ <- switchAppHost (pure whenQuit) never
+  postExitEvent $ leftmost [
+      _windowCfgDestroy cfg
+    , _windowClosed w]
   return w

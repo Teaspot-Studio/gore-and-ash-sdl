@@ -64,6 +64,7 @@ module Game.GoreAndAsh.SDL.Window(
   ) where
 
 import Control.Lens (makeLenses)
+import Data.Functor
 import Data.Text (Text)
 import Data.Word
 import Foreign.C
@@ -71,13 +72,14 @@ import GHC.Generics
 import Linear
 import Linear.Affine
 import Data.Vector.Storable as VS (Vector)
+import Control.Monad.Trans
 
 import SDL as ReExport hiding (get, Event)
 
 import Game.GoreAndAsh
 
 -- | Action that draws content of the window
-type WindowDrawer t = Window -> Renderer -> HostFrame t ()
+type WindowDrawer = Window -> Maybe Renderer -> IO ()
 
 -- | Input configuration of window widget
 data WindowWidgetConf t = WindowWidgetConf {
@@ -91,7 +93,7 @@ data WindowWidgetConf t = WindowWidgetConf {
 , _windowCfgDestroy :: Event t ()
   -- | How to draw the window, each time the event fires the window is redrawn.
   -- User should make GL context current and buffer swapping by herself.
-, _windowCfgDraw :: Event t (WindowDrawer t)
+, _windowCfgDraw :: Event t WindowDrawer
   -- | The window is hidden when the event fires
 , _windowCfgHide :: Event t ()
   -- | The window is raised above other windows and set input focus when the event fires
@@ -150,10 +152,10 @@ defaultWindowCfg = WindowWidgetConf {
 data WindowWidget t = WindowWidget {
   -- | Window SDL object
   _windowWindow :: Window
-  -- | Window SDL renderer
-, _windowRenderer :: Renderer
-  -- | Holds GL context for the window
-, _windowContext :: GLContext
+  -- | Window SDL renderer, created if no GL context is specified in config
+, _windowRenderer :: Maybe Renderer
+  -- | Holds GL context for the window, created if some GL specified in config
+, _windowContext :: Maybe GLContext
   -- | Configuration that was used to create the window
 , _windowConf :: WindowWidgetConf t
   -- | Tracks current size of window
@@ -212,11 +214,9 @@ makeLenses ''WindowWidget
 -- | Get event that fires when window widget need a redraw
 windowNeedRedraw :: Reflex t => WindowWidget t -> Event t ()
 windowNeedRedraw w = leftmost [
-    nulify $ _windowResized w
-  , nulify $ _windowShown w
-  , nulify $ _windowExposed w
-  , nulify $ _windowExposed w
-  , nulify $ _windowRestored w
+    void $ _windowResized w
+  , void $ _windowShown w
+  , void $ _windowExposed w
+  , void $ _windowExposed w
+  , void $ _windowRestored w
   ]
-  where
-    nulify = fmap (const ())

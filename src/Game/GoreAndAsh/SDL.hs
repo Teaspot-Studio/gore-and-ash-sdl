@@ -47,6 +47,8 @@ type AppActor i a b = GameActor AppMonad i a b
 module Game.GoreAndAsh.SDL(
     SDL'ModuleException(..)
   , SDLT
+  , runSDLT
+  , withSDLT
   -- * Basic API
   , MonadSDL(..)
   , WindowConfig(..)
