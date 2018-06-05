@@ -54,7 +54,7 @@ import Game.GoreAndAsh.SDL.Window
 -- | API of the module
 class (MonadIO m, MonadGame t m, MonadFix m) => MonadSDL t m | m -> t where
   -- | Creates new window widget
-  sdlCreateWindow :: WindowWidgetConf t -> m (WindowWidget t)
+  sdlCreateWindow :: WindowWidgetConf t -> m (Event t (WindowWidget t))
 
   -- | Getting window shown event
   sdlWindowShownEvent :: m (Event t WindowShownEventData)
@@ -143,70 +143,75 @@ class (MonadIO m, MonadGame t m, MonadFix m) => MonadSDL t m | m -> t where
 instance {-# OVERLAPPING #-} (MonadIO m, MonadGame t m) => MonadSDL t (SDLT t m) where
   sdlCreateWindow cfg@WindowWidgetConf{..} = do
     initTitle <- sample (current _windowCfgTitle)
-    w <- createWindow initTitle _windowCfgConfig
-    (_windowContext, mr) <- case windowOpenGL _windowCfgConfig of
-      Nothing ->  (,) <$> pure Nothing <*> (fmap Just $ createRenderer w (-1) _windowCfgRendererConfig)
-      Just _ -> (,) <$> (fmap Just $ glCreateContext w) <*> pure Nothing
+    buildE <- getPostBuild
+    -- First we need to create window in main thread
+    we <- performInMainThread $ ffor buildE $ const $ do
+      w <- createWindow initTitle _windowCfgConfig
+      (mc, mr) <- case windowOpenGL _windowCfgConfig of
+        Nothing ->  (,) <$> pure Nothing <*> (fmap Just $ createRenderer w (-1) _windowCfgRendererConfig)
+        Just _ -> (,) <$> (fmap Just $ glCreateContext w) <*> pure Nothing
+      pure (w, mc, mr)
+    -- When we got window and context we can now initialize FRP network for it
+    performNetwork $ ffor we $ \(w, _windowContext, mr) -> do
+      -- Destroy context, renderer and window itself
+      performEvent_ $ ffor _windowCfgDestroy $ const $ do
+        whenJust _windowContext glDeleteContext
+        whenJust mr destroyRenderer
+        destroyWindow w
 
-    -- Destroy context, renderer and window itself
-    performEvent_ $ ffor _windowCfgDestroy $ const $ do
-      whenJust _windowContext glDeleteContext
-      whenJust mr destroyRenderer
-      destroyWindow w
+      -- Select context (if any), perform draw. Swapping users do theirself
+      _windowDrawn <- performInMainThread $ ffor _windowCfgDraw $ \draw -> draw w mr
 
-    -- Select context (if any), perform draw. Swapping users do theirself
-    _windowDrawn <- performInMainThread $ ffor _windowCfgDraw $ \draw -> draw w mr
+      performEvent_ $ ffor (updated _windowCfgTitle) (windowTitle w $=)
+      performEvent_ $ ffor _windowCfgHide $ const $ hideWindow w
+      performEvent_ $ ffor _windowCfgRaise $ const $ raiseWindow w
+      performEvent_ $ ffor _windowCfgShow $ const $ showWindow w
+      performEvent_ $ ffor _windowCfgMinimumSize (windowMinimumSize w $=)
+      performEvent_ $ ffor _windowCfgMaximumSize (windowMaximumSize w $=)
+      performEvent_ $ ffor _windowCfgSize (windowSize w $=)
+      performEvent_ $ ffor _windowCfgBordered (windowBordered w $=)
+      performEvent_ $ ffor _windowCfgBrightness (windowBrightness w $=)
+      performEvent_ $ ffor _windowCfgGammaRamp (windowGammaRamp w $=)
+      performEvent_ $ ffor _windowCfgGrab (windowGrab w $=)
+      performEvent_ $ ffor _windowCfgWindowMode (setWindowMode w)
+      performEvent_ $ ffor _windowCfgPosition (setWindowPosition w)
 
-    performEvent_ $ ffor (updated _windowCfgTitle) (windowTitle w $=)
-    performEvent_ $ ffor _windowCfgHide $ const $ hideWindow w
-    performEvent_ $ ffor _windowCfgRaise $ const $ raiseWindow w
-    performEvent_ $ ffor _windowCfgShow $ const $ showWindow w
-    performEvent_ $ ffor _windowCfgMinimumSize (windowMinimumSize w $=)
-    performEvent_ $ ffor _windowCfgMaximumSize (windowMaximumSize w $=)
-    performEvent_ $ ffor _windowCfgSize (windowSize w $=)
-    performEvent_ $ ffor _windowCfgBordered (windowBordered w $=)
-    performEvent_ $ ffor _windowCfgBrightness (windowBrightness w $=)
-    performEvent_ $ ffor _windowCfgGammaRamp (windowGammaRamp w $=)
-    performEvent_ $ ffor _windowCfgGrab (windowGrab w $=)
-    performEvent_ $ ffor _windowCfgWindowMode (setWindowMode w)
-    performEvent_ $ ffor _windowCfgPosition (setWindowPosition w)
+      -- Transforms and filters event
+      let filterEvent :: Functor f => (a -> Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
+          filterEvent getter f = fmap (fmap f . ffilter ((== w) . getter))
 
-    -- Transforms and filters event
-    let filterEvent :: Functor f => (a -> Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
-        filterEvent getter f = fmap (fmap f . ffilter ((== w) . getter))
+          filterEventM :: Functor f => (a -> Maybe Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
+          filterEventM getter f = fmap (fmap f . ffilter ((== Just w) . getter))
 
-        filterEventM :: Functor f => (a -> Maybe Window) -> (a -> b) -> f (Event t a) -> f (Event t b)
-        filterEventM getter f = fmap (fmap f . ffilter ((== Just w) . getter))
+      _windowShown <- filterEvent windowShownEventWindow (const ()) sdlWindowShownEvent
+      _windowHidden <- filterEvent windowHiddenEventWindow (const ()) sdlWindowHiddenEvent
+      _windowExposed <- filterEvent windowExposedEventWindow (const ()) sdlWindowExposedEvent
+      _windowMoved <- filterEvent windowMovedEventWindow (fmap fromIntegral . windowMovedEventPosition) sdlWindowMovedEvent
+      _windowResized <- filterEvent windowResizedEventWindow (fmap fromIntegral . windowResizedEventSize) sdlWindowResizedEvent
+      _windowSizeChanged <- filterEvent windowSizeChangedEventWindow (const ()) sdlWindowSizeChangedEvent
+      _windowMinimized <- filterEvent windowMinimizedEventWindow (const ()) sdlWindowMinimizedEvent
+      _windowMaximized <- filterEvent windowMaximizedEventWindow (const ()) sdlWindowMaximizedEvent
+      _windowRestored <- filterEvent windowRestoredEventWindow (const ()) sdlWindowRestoredEvent
+      _windowGainedMouseFocus <- filterEvent windowGainedMouseFocusEventWindow (const ()) sdlWindowGainedMouseFocusEvent
+      _windowLostMouseFocus <- filterEvent windowLostMouseFocusEventWindow (const ()) sdlWindowLostMouseFocusEvent
+      _windowGainedKeyboardFocus <- filterEvent windowGainedKeyboardFocusEventWindow (const ()) sdlWindowGainedKeyboardFocusEvent
+      _windowLostKeyboardFocus <- filterEvent windowLostKeyboardFocusEventWindow (const ()) sdlWindowLostKeyboardFocusEvent
+      _windowClosed <- filterEvent windowClosedEventWindow (const ()) sdlWindowClosedEvent
+      _windowKeyboardEvent <- filterEventM keyboardEventWindow id sdlKeyboardEvent
+      _windowTextEditingEvent <- filterEventM textEditingEventWindow id sdlTextEditingEvent
+      _windowTextInputEvent <- filterEventM textInputEventWindow id sdlTextInputEvent
+      _windowMouseMotionEvent <- filterEventM mouseMotionEventWindow id sdlMouseMotionEvent
+      _windowMouseButtonEvent <- filterEventM mouseButtonEventWindow id sdlMouseButtonEvent
+      _windowMouseWheelEvent <- filterEventM mouseWheelEventWindow id sdlMouseWheelEvent
+      _windowUserEvent <- filterEventM userEventWindow id sdlUserEvent
 
-    _windowShown <- filterEvent windowShownEventWindow (const ()) sdlWindowShownEvent
-    _windowHidden <- filterEvent windowHiddenEventWindow (const ()) sdlWindowHiddenEvent
-    _windowExposed <- filterEvent windowExposedEventWindow (const ()) sdlWindowExposedEvent
-    _windowMoved <- filterEvent windowMovedEventWindow (fmap fromIntegral . windowMovedEventPosition) sdlWindowMovedEvent
-    _windowResized <- filterEvent windowResizedEventWindow (fmap fromIntegral . windowResizedEventSize) sdlWindowResizedEvent
-    _windowSizeChanged <- filterEvent windowSizeChangedEventWindow (const ()) sdlWindowSizeChangedEvent
-    _windowMinimized <- filterEvent windowMinimizedEventWindow (const ()) sdlWindowMinimizedEvent
-    _windowMaximized <- filterEvent windowMaximizedEventWindow (const ()) sdlWindowMaximizedEvent
-    _windowRestored <- filterEvent windowRestoredEventWindow (const ()) sdlWindowRestoredEvent
-    _windowGainedMouseFocus <- filterEvent windowGainedMouseFocusEventWindow (const ()) sdlWindowGainedMouseFocusEvent
-    _windowLostMouseFocus <- filterEvent windowLostMouseFocusEventWindow (const ()) sdlWindowLostMouseFocusEvent
-    _windowGainedKeyboardFocus <- filterEvent windowGainedKeyboardFocusEventWindow (const ()) sdlWindowGainedKeyboardFocusEvent
-    _windowLostKeyboardFocus <- filterEvent windowLostKeyboardFocusEventWindow (const ()) sdlWindowLostKeyboardFocusEvent
-    _windowClosed <- filterEvent windowClosedEventWindow (const ()) sdlWindowClosedEvent
-    _windowKeyboardEvent <- filterEventM keyboardEventWindow id sdlKeyboardEvent
-    _windowTextEditingEvent <- filterEventM textEditingEventWindow id sdlTextEditingEvent
-    _windowTextInputEvent <- filterEventM textInputEventWindow id sdlTextInputEvent
-    _windowMouseMotionEvent <- filterEventM mouseMotionEventWindow id sdlMouseMotionEvent
-    _windowMouseButtonEvent <- filterEventM mouseButtonEventWindow id sdlMouseButtonEvent
-    _windowMouseWheelEvent <- filterEventM mouseWheelEventWindow id sdlMouseWheelEvent
-    _windowUserEvent <- filterEventM userEventWindow id sdlUserEvent
+      let initialSize = fmap fromIntegral . windowInitialSize $ _windowCfgConfig
+      _windowSizeDyn <- holdDyn initialSize _windowResized
 
-    let initialSize = fmap fromIntegral . windowInitialSize $ _windowCfgConfig
-    _windowSizeDyn <- holdDyn initialSize _windowResized
-
-    let _windowWindow = w
-        _windowRenderer = mr
-        _windowConf = cfg
-    return WindowWidget{..}
+      let _windowWindow = w
+          _windowRenderer = mr
+          _windowConf = cfg
+      return WindowWidget{..}
 
   sdlWindowShownEvent = asks sdlStateWindowShownEvent
   sdlWindowHiddenEvent = asks sdlStateWindowHiddenEvent
@@ -478,17 +483,19 @@ createMainWindow :: MonadSDL t m
   => Event t () -- ^ Window redraw event
   -> WindowDrawer -- ^ How to redraw window (including resizing and other additional causes of redraw)
   -> WindowWidgetConf t -- ^ Config to use
-  -> m (WindowWidget t)
+  -> m (Event t (WindowWidget t))
 createMainWindow redrawE draw cfg = do
   buildE <- getPostBuild
   rec
     let cfg' = cfg
           & windowCfgDraw .~ fmap (const draw) drawE
-          & windowCfgDestroy .~ _windowClosed w
-    w <- sdlCreateWindow cfg'
-    let drawE = leftmost [windowNeedRedraw w, redrawE, buildE]
+          & windowCfgDestroy .~ closeE
+    wE <- sdlCreateWindow cfg'
+    closeE <- fmap (switch . current) $ holdDyn never $ _windowClosed <$> wE
+    needRedrawE <- fmap (switch . current) $ holdDyn never $ windowNeedRedraw <$> wE
+    let drawE = leftmost [needRedrawE, redrawE, buildE]
 
   postExitEvent $ leftmost [
       _windowCfgDestroy cfg
-    , _windowClosed w]
-  return w
+    , closeE]
+  return wE
